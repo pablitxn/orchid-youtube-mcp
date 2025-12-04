@@ -1,0 +1,17 @@
+.claude/
+dist/
+__pycache__/
+*.pyc
+.env
+.vscode/
+.idea/
+node_modules/
+*.log
+coverage/
+*.sqlite3
+*.db
+*.iml
+out/
+build/
+CLAUDE.md
+docs/
