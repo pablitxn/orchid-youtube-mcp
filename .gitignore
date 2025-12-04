@@ -1,17 +1,77 @@
-.claude/
-dist/
+# Python
 __pycache__/
-*.pyc
-.env
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# uv
+.python-version
+uv.lock
+
+# IDE
 .vscode/
 .idea/
-node_modules/
+*.iml
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Mypy
+.mypy_cache/
+
+# Ruff
+.ruff_cache/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
 *.log
-coverage/
+logs/
+
+# Database files
 *.sqlite3
 *.db
-*.iml
-out/
-build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+/config/appsettings.local.json
+/downloads/
+/temp/
+
+# Claude Code
+.claude/
 CLAUDE.md
-docs/
