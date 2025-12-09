@@ -126,6 +126,8 @@ class ImageEmbeddingSettings(BaseModel):
     """Image embedding settings."""
 
     provider: Literal["clip", "vertex"] = "clip"
+    api_url: str = "http://localhost:8080"
+    api_key: str | None = None
     model: str = "ViT-B/32"
     dimensions: int = 512
     batch_size: int = 32

@@ -31,6 +31,35 @@ mypy src
 pre-commit run --all-files
 ```
 
+### Pre-commit Checks (IMPORTANT)
+**Always run pre-commit checks before committing code** to avoid commit failures:
+
+```bash
+# Run on staged files only
+pre-commit run
+
+# Run on all files (recommended before committing)
+pre-commit run --all-files
+
+# Run specific hook
+pre-commit run ruff --all-files
+pre-commit run mypy --all-files
+```
+
+The pre-commit hooks enforce:
+- Trailing whitespace removal
+- End of file fixes
+- YAML/JSON validation
+- Large file checks
+- Merge conflict detection
+- Private key detection
+- **Ruff linting** (auto-fixes some issues)
+- **Ruff formatting** (auto-formats code)
+- **Mypy type checking** (strict mode)
+- **Conventional commit** message format
+
+If pre-commit fails, fix the issues and stage the changes again before committing.
+
 ### Testing
 ```bash
 # Run all tests with coverage

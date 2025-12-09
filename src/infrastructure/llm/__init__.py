@@ -11,8 +11,10 @@ from src.infrastructure.llm.base import (
     Message,
     MessageRole,
 )
+from src.infrastructure.llm.openai_llm import OpenAILLMService
 
 __all__ = [
+    # Base classes
     "LLMServiceBase",
     "LLMResponse",
     "LLMResponseWithTools",
@@ -22,4 +24,6 @@ __all__ = [
     "FunctionDefinition",
     "FunctionParameter",
     "FunctionCall",
+    # Implementations
+    "OpenAILLMService",
 ]

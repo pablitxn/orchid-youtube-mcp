@@ -6,6 +6,21 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
+    # Infrastructure - Storage
+    "minio>=7.2.0",
+    "qdrant-client>=1.12.0",
+    "motor>=3.6.0",  # async MongoDB driver
+    # Infrastructure - YouTube
+    "yt-dlp>=2024.11.0",
+    # Infrastructure - AI Services
+    "openai>=1.55.0",
+    "httpx>=0.28.0",
+    # Infrastructure - Video Processing
+    "ffmpeg-python>=0.2.0",
+    "pillow>=11.0.0",
+    # Utilities
+    "aiofiles>=24.1.0",
+    "tenacity>=9.0.0",  # retry logic
 ]
 
 [project.optional-dependencies]
@@ -16,6 +31,9 @@ dev = [
     "pytest-cov>=6.0",
     "pytest-asyncio>=0.24",
     "pre-commit>=4.0",
+    # Type stubs
+    "types-aiofiles>=24.1.0",
+    "types-pillow>=10.2.0",
 ]
 
 [build-system]
@@ -85,6 +103,20 @@ disable_error_code = ["no-untyped-call", "unused-ignore", "comparison-overlap", 
 
 [[tool.mypy.overrides]]
 module = "pytest"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "minio.*",
+    "qdrant_client.*",
+    "motor.*",
+    "bson.*",
+    "yt_dlp.*",
+    "ffmpeg.*",
+    "openai.*",
+    "httpx.*",
+    "PIL.*",
+]
 ignore_missing_imports = true
 
 # Pytest configuration
