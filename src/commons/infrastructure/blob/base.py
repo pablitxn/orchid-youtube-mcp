@@ -76,7 +76,7 @@ class BlobStorageBase(ABC):
         """
 
     @abstractmethod
-    async def download_stream(
+    def download_stream(
         self,
         bucket: str,
         path: str,
@@ -92,6 +92,7 @@ class BlobStorageBase(ABC):
         Yields:
             Chunks of blob content.
         """
+        ...
 
     @abstractmethod
     async def delete(self, bucket: str, path: str) -> bool:

@@ -112,7 +112,7 @@ class MinioBlobStorage(BlobStorageBase):
 
         return await loop.run_in_executor(None, _download)
 
-    async def download_stream(  # type: ignore[override]
+    async def download_stream(
         self,
         bucket: str,
         path: str,
