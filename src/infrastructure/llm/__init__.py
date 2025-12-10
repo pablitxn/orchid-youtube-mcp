@@ -1,5 +1,6 @@
 """LLM services."""
 
+from src.infrastructure.llm.anthropic_llm import AnthropicLLMService
 from src.infrastructure.llm.base import (
     FunctionCall,
     FunctionDefinition,
@@ -25,5 +26,6 @@ __all__ = [
     "FunctionParameter",
     "FunctionCall",
     # Implementations
+    "AnthropicLLMService",
     "OpenAILLMService",
 ]

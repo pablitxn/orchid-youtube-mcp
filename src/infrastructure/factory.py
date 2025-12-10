@@ -11,7 +11,7 @@ from src.infrastructure.embeddings import (
     EmbeddingServiceBase,
     OpenAIEmbeddingService,
 )
-from src.infrastructure.llm import LLMServiceBase, OpenAILLMService
+from src.infrastructure.llm import AnthropicLLMService, LLMServiceBase, OpenAILLMService
 from src.infrastructure.transcription import (
     OpenAIWhisperTranscription,
     TranscriptionServiceBase,
@@ -155,13 +155,29 @@ class InfrastructureFactory:
 
         Returns:
             Configured LLM service.
+
+        Raises:
+            ValueError: If provider is not supported.
         """
         if "llm" not in self._instances:
             llm_settings = self._settings.llm
-            self._instances["llm"] = OpenAILLMService(
-                api_key=llm_settings.api_key,
-                model=llm_settings.model,
-            )
+            provider = llm_settings.provider
+
+            if provider == "anthropic":
+                self._instances["llm"] = AnthropicLLMService(
+                    api_key=llm_settings.api_key,
+                    model=llm_settings.model,
+                    base_url=llm_settings.endpoint,
+                )
+            elif provider in ("openai", "azure_openai"):
+                self._instances["llm"] = OpenAILLMService(
+                    api_key=llm_settings.api_key,
+                    model=llm_settings.model,
+                    base_url=llm_settings.endpoint,
+                )
+            else:
+                raise ValueError(f"Unsupported LLM provider: {provider}")
+
         return cast(LLMServiceBase, self._instances["llm"])
 
     def get_frame_extractor(self) -> FrameExtractorBase:

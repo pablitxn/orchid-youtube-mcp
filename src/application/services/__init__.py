@@ -6,6 +6,7 @@ from src.application.services.ingestion import (
     IngestionError,
     VideoIngestionService,
 )
+from src.application.services.query import VideoQueryService
 from src.application.services.storage import VideoStorageService
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "EmbeddingStats",
     "IngestionError",
     "VideoIngestionService",
+    "VideoQueryService",
     "VideoStorageService",
 ]

@@ -1,0 +1,295 @@
+# yaml-language-server: $schema=https://squidfunk.github.io/mkdocs-material/schema.json
+
+site_name: YouTube RAG Server
+site_description: Multimodal Video RAG for LLM Agents - Technical Documentation
+site_author: YouTube RAG Team
+site_url: https://youtube-rag-server.github.io/
+
+repo_name: youtube-rag-server
+repo_url: https://github.com/youtube-rag-server/youtube-rag-server
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; 2024 YouTube RAG Server
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.select
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/youtube
+  favicon: assets/favicon.ico
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+  - mermaid2:
+      arguments:
+        theme: neutral
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+  - minify:
+      minify_html: true
+  - glightbox:
+      touchNavigation: true
+      loop: false
+      effect: zoom
+      slide_effect: slide
+      width: 100%
+      height: auto
+      zoomable: true
+      draggable: true
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            docstring_options:
+              ignore_init_summary: true
+            merge_init_into_class: true
+            show_submodules: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: true
+            show_bases: true
+            show_inheritance_diagram: true
+            heading_level: 2
+            members_order: source
+            separate_signature: true
+            signature_crossrefs: true
+            summary: true
+            show_signature_annotations: true
+            annotations_path: brief
+
+markdown_extensions:
+  # Python Markdown
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+  # PyMdown Extensions
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+      auto_title: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets:
+      auto_append:
+        - docs/includes/abbreviations.md
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+      combine_header_slug: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  generator: false
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/youtube-rag-server
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/youtube-rag-server/
+  version:
+    provider: mike
+  analytics:
+    feedback:
+      title: Was this page helpful?
+      ratings:
+        - icon: material/emoticon-happy-outline
+          name: This page was helpful
+          data: 1
+          note: Thanks for your feedback!
+        - icon: material/emoticon-sad-outline
+          name: This page could be improved
+          data: 0
+          note: Thanks for your feedback!
+
+extra_css:
+  - stylesheets/extra.css
+
+nav:
+  - Home: index.md
+
+  - Getting Started:
+    - getting-started/index.md
+    - Quick Start: getting-started/quick-start.md
+    - Installation: getting-started/installation.md
+    - Use Cases: getting-started/use-cases.md
+
+  - Architecture:
+    - architecture/index.md
+    - System Overview: architecture/system-overview.md
+    - Hexagonal Architecture: architecture/hexagonal.md
+    - Data Flow: architecture/data-flow.md
+    - Design Principles: architecture/design-principles.md
+    - Technology Stack: architecture/tech-stack.md
+
+  - Domain Layer:
+    - domain/index.md
+    - Video Metadata: domain/video-metadata.md
+    - Chunks: domain/chunks.md
+    - Embeddings: domain/embeddings.md
+    - Citations: domain/citations.md
+    - Value Objects: domain/value-objects.md
+    - Exceptions: domain/exceptions.md
+
+  - Application Layer:
+    - application/index.md
+    - Video Ingestion Service: application/ingestion-service.md
+    - Chunking Service: application/chunking-service.md
+    - Embedding Service: application/embedding-service.md
+    - Storage Service: application/storage-service.md
+    - Query Service: application/query-service.md
+    - DTOs: application/dtos.md
+    - Pipelines: application/pipelines.md
+
+  - Infrastructure:
+    - infrastructure/index.md
+    - Blob Storage:
+      - infrastructure/blob/index.md
+      - Abstract Interface: infrastructure/blob/interface.md
+      - MinIO Provider: infrastructure/blob/minio.md
+      - Cloud Providers: infrastructure/blob/cloud.md
+    - Vector Database:
+      - infrastructure/vectordb/index.md
+      - Abstract Interface: infrastructure/vectordb/interface.md
+      - Qdrant Provider: infrastructure/vectordb/qdrant.md
+    - Document Database:
+      - infrastructure/documentdb/index.md
+      - Abstract Interface: infrastructure/documentdb/interface.md
+      - MongoDB Provider: infrastructure/documentdb/mongodb.md
+    - AI Services:
+      - infrastructure/ai/index.md
+      - Transcription: infrastructure/ai/transcription.md
+      - Embeddings: infrastructure/ai/embeddings.md
+      - LLM: infrastructure/ai/llm.md
+    - Video Processing:
+      - infrastructure/video/index.md
+      - YouTube Downloader: infrastructure/video/youtube.md
+      - Frame Extractor: infrastructure/video/frames.md
+      - Video Chunker: infrastructure/video/chunker.md
+    - Factory Pattern: infrastructure/factory.md
+    - Adding Providers: infrastructure/adding-providers.md
+
+  - API Reference:
+    - api/index.md
+    - REST API:
+      - api/rest/index.md
+      - Ingestion: api/rest/ingestion.md
+      - Query: api/rest/query.md
+      - Sources: api/rest/sources.md
+      - Management: api/rest/management.md
+      - Health: api/rest/health.md
+    - MCP Server:
+      - api/mcp/index.md
+      - Tools Reference: api/mcp/tools.md
+    - Error Handling: api/errors.md
+    - Rate Limiting: api/rate-limiting.md
+
+  - Configuration:
+    - configuration/index.md
+    - Settings Hierarchy: configuration/hierarchy.md
+    - Environment Variables: configuration/env-vars.md
+    - JSON Files: configuration/json-files.md
+    - Pydantic Models: configuration/pydantic.md
+    - Kubernetes Secrets: configuration/k8s-secrets.md
+
+  - Development:
+    - development/index.md
+    - Local Setup: development/local-setup.md
+    - Docker Compose: development/docker-compose.md
+    - Code Style: development/code-style.md
+    - Testing: development/testing.md
+    - Pre-commit Hooks: development/pre-commit.md
+    - Debugging: development/debugging.md
+
+  - Deployment:
+    - deployment/index.md
+    - Docker: deployment/docker.md
+    - Kubernetes: deployment/kubernetes.md
+    - GitOps with ArgoCD: deployment/gitops.md
+    - Monitoring: deployment/monitoring.md
+
+  - Reference:
+    - reference/index.md
+    - Python API: reference/python-api.md
+    - Configuration Reference: reference/config-reference.md
+    - Data Models: reference/data-models.md
+    - Error Codes: reference/error-codes.md
+    - Glossary: reference/glossary.md
+    - Implementation Status: reference/implementation-status.md
+
+  - Contributing:
+    - contributing/index.md
+    - Code of Conduct: contributing/code-of-conduct.md
+    - Contributing Guide: contributing/guide.md
+    - Pull Request Process: contributing/pull-requests.md
+    - Adding Providers: contributing/adding-providers.md
+    - Roadmap: contributing/roadmap.md

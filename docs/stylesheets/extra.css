@@ -1,0 +1,103 @@
+/* Custom styles for YouTube RAG Server documentation */
+
+/* Root variables */
+:root {
+  --md-primary-fg-color: #7c3aed;
+  --md-primary-fg-color--light: #a78bfa;
+  --md-primary-fg-color--dark: #5b21b6;
+  --md-accent-fg-color: #8b5cf6;
+}
+
+/* Dark mode adjustments */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #a78bfa;
+  --md-primary-fg-color--light: #c4b5fd;
+  --md-primary-fg-color--dark: #7c3aed;
+}
+
+/* Code block styling */
+.md-typeset code {
+  font-size: 0.85em;
+}
+
+.md-typeset pre > code {
+  font-size: 0.8em;
+}
+
+/* Improve table readability */
+.md-typeset table:not([class]) {
+  font-size: 0.8rem;
+  border: 1px solid var(--md-typeset-table-color);
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--md-primary-fg-color--light);
+  color: white;
+  font-weight: 600;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+  background-color: var(--md-primary-fg-color--dark);
+}
+
+/* Admonition improvements */
+.md-typeset .admonition {
+  font-size: 0.85rem;
+}
+
+/* Mermaid diagram styling */
+.mermaid {
+  text-align: center;
+  margin: 1.5rem 0;
+}
+
+/* Navigation improvements */
+.md-nav__link {
+  font-size: 0.75rem;
+}
+
+/* Footer */
+.md-footer-meta {
+  background-color: var(--md-primary-fg-color--dark);
+}
+
+/* Grid cards on homepage */
+.md-typeset .grid.cards > ul > li {
+  border: 1px solid var(--md-typeset-table-color);
+  border-radius: 0.5rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
+/* API reference styling */
+.doc-heading {
+  border-bottom: 2px solid var(--md-primary-fg-color);
+  padding-bottom: 0.5rem;
+}
+
+.doc-object {
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background-color: var(--md-code-bg-color);
+  border-radius: 0.5rem;
+}
+
+/* Tabs */
+.md-typeset .tabbed-labels > label {
+  font-weight: 500;
+}
+
+/* Make inline code more visible */
+.md-typeset :not(pre) > code {
+  padding: 0.1em 0.4em;
+  border-radius: 0.25rem;
+}
+
+/* Improve keyboard key styling */
+.md-typeset kbd {
+  box-shadow: 0 2px 0 1px var(--md-default-fg-color--lighter);
+}
