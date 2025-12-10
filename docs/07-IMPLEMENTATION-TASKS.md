@@ -361,72 +361,73 @@ This document breaks down the implementation into phases with specific tasks. Ea
 
 ---
 
-## Phase 5: API Layer ⏳
+## Phase 5: API Layer ✅
 
 **Goal**: Expose functionality via MCP and REST.
 
-**Status**: NOT STARTED
+**Status**: COMPLETED (tests pending)
 
 ### Tasks
 
 #### 5.1 FastAPI Setup
 
-- [ ] **5.1.1** Create app factory
-  - [ ] `src/api/main.py`
-  - [ ] Lifespan management
-  - [ ] Middleware setup
+- [x] **5.1.1** Create app factory
+  - [x] `src/api/main.py`
+  - [x] Lifespan management
+  - [x] Middleware setup
 
-- [ ] **5.1.2** Create dependency injection
-  - [ ] `src/api/dependencies.py`
-  - [ ] Settings injection
-  - [ ] Service injection
+- [x] **5.1.2** Create dependency injection
+  - [x] `src/api/dependencies.py`
+  - [x] Settings injection
+  - [x] Service injection
 
-- [ ] **5.1.3** Create middleware
-  - [ ] `src/api/middleware/logging.py`
-  - [ ] `src/api/middleware/error_handler.py`
-  - [ ] Request ID tracking
-  - [ ] Error formatting
+- [x] **5.1.3** Create middleware
+  - [x] `src/api/middleware/logging.py`
+  - [x] `src/api/middleware/error_handler.py`
+  - [x] Request ID tracking
+  - [x] Error formatting
 
 #### 5.2 REST Endpoints
 
-- [ ] **5.2.1** Ingestion routes
-  - [ ] `src/api/openapi/routes/ingestion.py`
-  - [ ] `POST /videos/ingest`
-  - [ ] `GET /videos/{id}/status`
+- [x] **5.2.1** Ingestion routes
+  - [x] `src/api/openapi/routes/ingestion.py`
+  - [x] `POST /videos/ingest`
+  - [x] `GET /videos/{id}/status`
 
-- [ ] **5.2.2** Query routes
-  - [ ] `src/api/openapi/routes/query.py`
-  - [ ] `POST /videos/{id}/query`
+- [x] **5.2.2** Query routes
+  - [x] `src/api/openapi/routes/query.py`
+  - [x] `POST /videos/{id}/query`
 
-- [ ] **5.2.3** Source routes
-  - [ ] `src/api/openapi/routes/sources.py`
-  - [ ] `GET /videos/{id}/sources`
+- [x] **5.2.3** Source routes
+  - [x] `src/api/openapi/routes/sources.py`
+  - [x] `GET /videos/{id}/sources`
 
-- [ ] **5.2.4** Management routes
-  - [ ] `src/api/openapi/routes/videos.py`
-  - [ ] `GET /videos`
-  - [ ] `DELETE /videos/{id}`
+- [x] **5.2.4** Management routes
+  - [x] `src/api/openapi/routes/videos.py`
+  - [x] `GET /videos`
+  - [x] `GET /videos/{id}`
+  - [x] `DELETE /videos/{id}`
 
-- [ ] **5.2.5** Health routes
-  - [ ] `src/api/openapi/routes/health.py`
-  - [ ] `GET /health`
-  - [ ] `GET /health/live`
-  - [ ] `GET /health/ready`
+- [x] **5.2.5** Health routes
+  - [x] `src/api/openapi/routes/health.py`
+  - [x] `GET /health`
+  - [x] `GET /health/live`
+  - [x] `GET /health/ready`
 
 #### 5.3 MCP Server
 
-- [ ] **5.3.1** MCP protocol implementation
-  - [ ] `src/api/mcp/server.py`
-  - [ ] Tool registration
-  - [ ] Request handling
+- [x] **5.3.1** MCP protocol implementation
+  - [x] `src/api/mcp/server.py`
+  - [x] Tool registration
+  - [x] Request handling
 
-- [ ] **5.3.2** Tool definitions
-  - [ ] `ingest_video` tool
-  - [ ] `get_ingestion_status` tool
-  - [ ] `query_video` tool
-  - [ ] `get_sources` tool
-  - [ ] `list_videos` tool
-  - [ ] `delete_video` tool
+- [x] **5.3.2** Tool definitions
+  - [x] `ingest_video` tool
+  - [x] `get_ingestion_status` tool
+  - [x] `query_video` tool
+  - [x] `get_sources` tool
+  - [x] `list_videos` tool
+  - [x] `delete_video` tool
 
 #### 5.4 API Tests
 
@@ -517,10 +518,10 @@ Phase 2 (Domain) ✅  Phase 3 (Infrastructure) ✅
       Phase 4 (Application) 🔄
              │
              ▼
-      Phase 5 (API) ⏳ ← CURRENT FOCUS
+      Phase 5 (API) ✅
              │
              ▼
-      Phase 6 (Integration) ⏳
+      Phase 6 (Integration) ⏳ ← NEXT FOCUS
              │
              ▼
       Phase 7 (Future) ⏳
@@ -537,11 +538,11 @@ Phase 2 (Domain) ✅  Phase 3 (Infrastructure) ✅
 | **Phase 2** | ✅ Complete | 10/10 | 0 |
 | **Phase 3** | ✅ Complete* | 10/14 | 4 (tests) |
 | **Phase 4** | 🔄 In Progress | 6/14 | 8 |
-| **Phase 5** | ⏳ Not Started | 0/13 | 13 |
+| **Phase 5** | ✅ Complete* | 10/13 | 3 (tests) |
 | **Phase 6** | ⏳ Not Started | 0/8 | 8 |
-| **Total** | - | 42/75 | 33 |
+| **Total** | - | 52/75 | 23 |
 
-*Phase 3 implementation complete, integration tests pending
+*Phase 3 and 5 implementation complete, tests pending
 
 ---
 

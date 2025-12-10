@@ -77,6 +77,27 @@ pytest -m e2e
 pytest tests/unit/test_example.py::test_function_name -v
 ```
 
+### Documentation
+```bash
+# Install docs dependencies
+uv sync --extra docs
+
+# Build documentation
+mkdocs build
+
+# Serve documentation locally (with hot reload)
+mkdocs serve
+
+# Deploy to GitHub Pages
+mkdocs gh-deploy
+```
+
+The documentation site is built with MkDocs Material and includes:
+- Architecture and design principles
+- Domain models reference
+- API documentation
+- Development guides
+
 ## Architecture
 
 The project follows a **layered hexagonal architecture** with clear separation of concerns:

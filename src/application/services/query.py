@@ -5,10 +5,14 @@ from typing import Any
 
 from src.application.dtos.query import (
     CitationDTO,
+    GetSourcesRequest,
     QueryMetadata,
     QueryModality,
     QueryVideoRequest,
     QueryVideoResponse,
+    SourceArtifact,
+    SourceDetail,
+    SourcesResponse,
     TimestampRangeDTO,
 )
 from src.commons.infrastructure.documentdb.base import DocumentDBBase
@@ -310,6 +314,109 @@ Please provide a clear, concise answer based on the context above."""
             QueryModality.VIDEO: Modality.VIDEO,
         }
         return [mapping[m] for m in query_modalities if m in mapping]
+
+    async def get_sources(
+        self,
+        video_id: str,
+        request: GetSourcesRequest,
+    ) -> SourcesResponse:
+        """Get detailed source artifacts for citations.
+
+        Args:
+            video_id: ID of the video.
+            request: Request with citation IDs and artifact types.
+
+        Returns:
+            Response with detailed source information.
+
+        Raises:
+            ValueError: If video not found.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        # Verify video exists
+        video = await self._document_db.find_by_id(self._videos_collection, video_id)
+        if not video:
+            raise ValueError(f"Video not found: {video_id}")
+
+        sources: list[SourceDetail] = []
+        expiry_minutes = request.url_expiry_minutes
+
+        for citation_id in request.citation_ids:
+            # Try to find the chunk in transcript chunks
+            chunk = await self._document_db.find_by_id(
+                self._chunks_collection,
+                citation_id,
+            )
+
+            if not chunk:
+                continue
+
+            # Build artifacts based on request
+            artifacts: dict[str, SourceArtifact] = {}
+
+            if "transcript_text" in request.include_artifacts:
+                artifacts["transcript_text"] = SourceArtifact(
+                    type="transcript_text",
+                    content=chunk.get("text", ""),
+                )
+
+            if "thumbnail" in request.include_artifacts:
+                # Try to get thumbnail from frame associated with this timestamp
+                thumbnail_url = await self._get_thumbnail_url(
+                    video_id,
+                    chunk.get("start_time", 0),
+                    expiry_minutes * 60,
+                )
+                if thumbnail_url:
+                    artifacts["thumbnail"] = SourceArtifact(
+                        type="thumbnail",
+                        url=thumbnail_url,
+                    )
+
+            start_time = chunk.get("start_time", 0)
+            end_time = chunk.get("end_time", 0)
+
+            start_fmt = self._format_timestamp(start_time)
+            end_fmt = self._format_timestamp(end_time)
+            source = SourceDetail(
+                citation_id=citation_id,
+                modality=QueryModality.TRANSCRIPT,
+                timestamp_range=TimestampRangeDTO(
+                    start_time=start_time,
+                    end_time=end_time,
+                    display=f"{start_fmt} - {end_fmt}",
+                ),
+                artifacts=artifacts,
+            )
+            sources.append(source)
+
+        expires_at = datetime.now(UTC) + timedelta(minutes=expiry_minutes)
+
+        return SourcesResponse(
+            sources=sources,
+            expires_at=expires_at,
+        )
+
+    async def _get_thumbnail_url(
+        self,
+        video_id: str,  # noqa: ARG002
+        timestamp: float,  # noqa: ARG002
+        expiry_seconds: int,  # noqa: ARG002
+    ) -> str | None:
+        """Get thumbnail URL for a timestamp.
+
+        Args:
+            video_id: Video ID.
+            timestamp: Time in seconds.
+            expiry_seconds: URL expiry time.
+
+        Returns:
+            Presigned URL or None.
+        """
+        # TODO: Implement with blob storage access
+        # In a full implementation, find the nearest frame and generate URL
+        return None
 
     @staticmethod
     def _format_timestamp(seconds: float) -> str:

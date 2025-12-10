@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api.dependencies import get_settings, init_services, shutdown_services
 from src.api.middleware.error_handler import error_handler_middleware
 from src.api.middleware.logging import LoggingMiddleware
-from src.api.openapi.routes import health, ingestion, query, videos
+from src.api.openapi.routes import health, ingestion, query, sources, videos
 
 
 @asynccontextmanager
@@ -86,6 +86,7 @@ def _register_routes(app: FastAPI, settings: Any) -> None:
     # API routes with version prefix
     app.include_router(ingestion.router, prefix=prefix, tags=["Ingestion"])
     app.include_router(query.router, prefix=prefix, tags=["Query"])
+    app.include_router(sources.router, prefix=prefix, tags=["Sources"])
     app.include_router(videos.router, prefix=prefix, tags=["Videos"])
 
 
