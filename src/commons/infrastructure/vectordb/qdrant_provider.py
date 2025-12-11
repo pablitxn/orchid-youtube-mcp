@@ -133,9 +133,9 @@ class QdrantVectorDB(VectorDBBase):
         """Search for similar vectors."""
         qdrant_filter = self._build_filter(filters) if filters else None
 
-        results = await self._client.search(
+        response = await self._client.query_points(
             collection_name=collection,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit,
             query_filter=qdrant_filter,
             score_threshold=score_threshold,
@@ -144,10 +144,10 @@ class QdrantVectorDB(VectorDBBase):
         return [
             SearchResult(
                 id=str(result.id),
-                score=result.score,
+                score=result.score or 0.0,
                 payload=result.payload or {},
             )
-            for result in results
+            for result in response.points
         ]
 
     async def delete_by_filter(
@@ -198,14 +198,18 @@ class QdrantVectorDB(VectorDBBase):
             with_vectors=True,
         )
 
-        return [
-            VectorPoint(
-                id=str(point.id),
-                vector=point.vector if isinstance(point.vector, list) else [],
-                payload=point.payload or {},
-            )
-            for point in results
-        ]
+        points: list[VectorPoint] = []
+        for point in results:
+            vec = point.vector
+            if isinstance(vec, list) and len(vec) > 0 and isinstance(vec[0], float):
+                points.append(
+                    VectorPoint(
+                        id=str(point.id),
+                        vector=vec,
+                        payload=point.payload or {},
+                    )
+                )
+        return points
 
     async def count(
         self,

@@ -43,6 +43,7 @@ def _create_query_service(
         vector_db=factory.get_vector_db(),
         document_db=factory.get_document_db(),
         settings=settings,
+        blob_storage=factory.get_blob_storage(),
     )
 
 

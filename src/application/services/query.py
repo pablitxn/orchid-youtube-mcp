@@ -15,6 +15,7 @@ from src.application.dtos.query import (
     SourcesResponse,
     TimestampRangeDTO,
 )
+from src.commons.infrastructure.blob.base import BlobStorageBase
 from src.commons.infrastructure.documentdb.base import DocumentDBBase
 from src.commons.infrastructure.vectordb.base import VectorDBBase
 from src.commons.settings.models import Settings
@@ -37,6 +38,7 @@ class VideoQueryService:
         vector_db: VectorDBBase,
         document_db: DocumentDBBase,
         settings: Settings,
+        blob_storage: BlobStorageBase | None = None,
     ) -> None:
         """Initialize query service.
 
@@ -46,16 +48,20 @@ class VideoQueryService:
             vector_db: Vector database for similarity search.
             document_db: Document database for metadata.
             settings: Application settings.
+            blob_storage: Optional blob storage for presigned URLs.
         """
         self._embedder = text_embedding_service
         self._llm = llm_service
         self._vector_db = vector_db
         self._document_db = document_db
         self._settings = settings
+        self._blob = blob_storage
 
         self._vectors_collection = settings.vector_db.collections.transcripts
         self._videos_collection = settings.document_db.collections.videos
         self._chunks_collection = settings.document_db.collections.transcript_chunks
+        self._frames_collection = settings.document_db.collections.frame_chunks
+        self._frames_bucket = settings.blob_storage.buckets.frames
 
     async def query(
         self,
@@ -400,11 +406,14 @@ Please provide a clear, concise answer based on the context above."""
 
     async def _get_thumbnail_url(
         self,
-        video_id: str,  # noqa: ARG002
-        timestamp: float,  # noqa: ARG002
-        expiry_seconds: int,  # noqa: ARG002
+        video_id: str,
+        timestamp: float,
+        expiry_seconds: int,
     ) -> str | None:
         """Get thumbnail URL for a timestamp.
+
+        Finds the nearest frame to the given timestamp and generates
+        a presigned URL for the thumbnail.
 
         Args:
             video_id: Video ID.
@@ -412,11 +421,57 @@ Please provide a clear, concise answer based on the context above."""
             expiry_seconds: URL expiry time.
 
         Returns:
-            Presigned URL or None.
+            Presigned URL or None if not available.
         """
-        # TODO: Implement with blob storage access
-        # In a full implementation, find the nearest frame and generate URL
-        return None
+        if self._blob is None:
+            return None
+
+        try:
+            # Find the nearest frame chunk to this timestamp
+            frames = await self._document_db.find(
+                self._frames_collection,
+                {
+                    "video_id": video_id,
+                    "start_time": {"$lte": timestamp},
+                    "end_time": {"$gte": timestamp},
+                },
+                limit=1,
+            )
+
+            if not frames:
+                # Try to find closest frame before timestamp
+                frames = await self._document_db.find(
+                    self._frames_collection,
+                    {
+                        "video_id": video_id,
+                        "start_time": {"$lte": timestamp},
+                    },
+                    sort=[("start_time", -1)],
+                    limit=1,
+                )
+
+            if not frames:
+                return None
+
+            frame = frames[0]
+            thumbnail_path = frame.get("thumbnail_path")
+
+            if not thumbnail_path:
+                return None
+
+            # Check if blob exists and generate presigned URL
+            if await self._blob.exists(self._frames_bucket, thumbnail_path):
+                return await self._blob.generate_presigned_url(
+                    self._frames_bucket,
+                    thumbnail_path,
+                    expiry_seconds=expiry_seconds,
+                )
+
+            return None
+
+        except Exception:
+            # Log error but don't fail the request
+            return None
 
     @staticmethod
     def _format_timestamp(seconds: float) -> str:

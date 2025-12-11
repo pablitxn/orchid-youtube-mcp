@@ -55,7 +55,7 @@ class InfrastructureFactory:
                 secure=blob_settings.use_ssl,
                 region=blob_settings.region,
             )
-        return cast(BlobStorageBase, self._instances["blob_storage"])
+        return cast("BlobStorageBase", self._instances["blob_storage"])
 
     def get_vector_db(self) -> VectorDBBase:
         """Get vector database instance.
@@ -71,7 +71,7 @@ class InfrastructureFactory:
                 grpc_port=vector_settings.grpc_port,
                 api_key=vector_settings.api_key,
             )
-        return cast(VectorDBBase, self._instances["vector_db"])
+        return cast("VectorDBBase", self._instances["vector_db"])
 
     def get_document_db(self) -> DocumentDBBase:
         """Get document database instance.
@@ -94,7 +94,7 @@ class InfrastructureFactory:
                 connection_string=connection_string,
                 database_name=doc_settings.database,
             )
-        return cast(DocumentDBBase, self._instances["document_db"])
+        return cast("DocumentDBBase", self._instances["document_db"])
 
     def get_youtube_downloader(self) -> YouTubeDownloaderBase:
         """Get YouTube downloader instance.
@@ -104,7 +104,7 @@ class InfrastructureFactory:
         """
         if "youtube_downloader" not in self._instances:
             self._instances["youtube_downloader"] = YtDlpDownloader()
-        return cast(YouTubeDownloaderBase, self._instances["youtube_downloader"])
+        return cast("YouTubeDownloaderBase", self._instances["youtube_downloader"])
 
     def get_transcription_service(self) -> TranscriptionServiceBase:
         """Get transcription service instance.
@@ -118,7 +118,7 @@ class InfrastructureFactory:
                 api_key=trans_settings.api_key,
                 model=trans_settings.model,
             )
-        return cast(TranscriptionServiceBase, self._instances["transcription"])
+        return cast("TranscriptionServiceBase", self._instances["transcription"])
 
     def get_text_embedding_service(self) -> EmbeddingServiceBase:
         """Get text embedding service instance.
@@ -132,7 +132,7 @@ class InfrastructureFactory:
                 api_key=embed_settings.api_key,
                 model=embed_settings.model,
             )
-        return cast(EmbeddingServiceBase, self._instances["text_embedding"])
+        return cast("EmbeddingServiceBase", self._instances["text_embedding"])
 
     def get_image_embedding_service(self) -> EmbeddingServiceBase:
         """Get image embedding service instance.
@@ -148,7 +148,7 @@ class InfrastructureFactory:
                 model=embed_settings.model,
                 dimensions=embed_settings.dimensions,
             )
-        return cast(EmbeddingServiceBase, self._instances["image_embedding"])
+        return cast("EmbeddingServiceBase", self._instances["image_embedding"])
 
     def get_llm_service(self) -> LLMServiceBase:
         """Get LLM service instance.
@@ -178,7 +178,7 @@ class InfrastructureFactory:
             else:
                 raise ValueError(f"Unsupported LLM provider: {provider}")
 
-        return cast(LLMServiceBase, self._instances["llm"])
+        return cast("LLMServiceBase", self._instances["llm"])
 
     def get_frame_extractor(self) -> FrameExtractorBase:
         """Get frame extractor instance.
@@ -188,7 +188,7 @@ class InfrastructureFactory:
         """
         if "frame_extractor" not in self._instances:
             self._instances["frame_extractor"] = FFmpegFrameExtractor()
-        return cast(FrameExtractorBase, self._instances["frame_extractor"])
+        return cast("FrameExtractorBase", self._instances["frame_extractor"])
 
     def get_video_chunker(self) -> VideoChunkerBase:
         """Get video chunker instance.
@@ -198,7 +198,7 @@ class InfrastructureFactory:
         """
         if "video_chunker" not in self._instances:
             self._instances["video_chunker"] = FFmpegVideoChunker()
-        return cast(VideoChunkerBase, self._instances["video_chunker"])
+        return cast("VideoChunkerBase", self._instances["video_chunker"])
 
     async def close_all(self) -> None:
         """Close all service connections."""
