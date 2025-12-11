@@ -135,7 +135,7 @@ class LLMServiceBase(ABC):
             Token strings as they are generated.
         """
         # Make this a generator
-        yield  # type: ignore[misc]
+        yield
 
     @abstractmethod
     async def generate_with_tools(

@@ -201,14 +201,17 @@ class QdrantVectorDB(VectorDBBase):
         points: list[VectorPoint] = []
         for point in results:
             vec = point.vector
-            if isinstance(vec, list) and len(vec) > 0 and isinstance(vec[0], float):
-                points.append(
-                    VectorPoint(
-                        id=str(point.id),
-                        vector=vec,
-                        payload=point.payload or {},
+            # Handle dense vectors (list of floats)
+            if isinstance(vec, list) and len(vec) > 0:
+                first_elem = vec[0]
+                if isinstance(first_elem, int | float):
+                    points.append(
+                        VectorPoint(
+                            id=str(point.id),
+                            vector=list(vec),
+                            payload=point.payload or {},
+                        )
                     )
-                )
         return points
 
     async def count(

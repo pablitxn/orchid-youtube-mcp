@@ -82,7 +82,7 @@ class TranscriptionServiceBase(ABC):
             Transcription segments as they become available.
         """
         # Make this a generator
-        yield  # type: ignore[misc]
+        yield
 
     @abstractmethod
     def supported_languages(self) -> list[str]:

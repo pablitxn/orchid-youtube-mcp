@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar, cast
 
 from openai import AsyncOpenAI
 
@@ -112,7 +112,9 @@ class OpenAIWhisperTranscription(TranscriptionServiceBase):
 
         with path.open("rb") as audio_file:
             # Use verbose_json to get word-level timestamps
-            response = await self._client.audio.transcriptions.create(
+            # Cast to Any to work around strict overload typing in OpenAI SDK
+            create_fn = cast("Any", self._client.audio.transcriptions.create)
+            response = await create_fn(
                 model=self._model,
                 file=audio_file,
                 language=language_hint,

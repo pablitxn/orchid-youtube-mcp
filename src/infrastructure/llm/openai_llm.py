@@ -165,8 +165,8 @@ class OpenAILLMService(LLMServiceBase):
         function_calls: list[FunctionCall] = []
         if message.tool_calls:
             for tool_call in message.tool_calls:
-                func = getattr(tool_call, "function", None)
-                if func:
+                if hasattr(tool_call, "function") and tool_call.function:
+                    func = tool_call.function
                     try:
                         args = json.loads(func.arguments)
                     except json.JSONDecodeError:
