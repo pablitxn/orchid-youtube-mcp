@@ -25,7 +25,10 @@ from src.domain.models.chunk import (
 )
 from src.domain.models.video import VideoMetadata, VideoStatus
 from src.infrastructure.embeddings.base import EmbeddingServiceBase
-from src.infrastructure.transcription.base import TranscriptionServiceBase
+from src.infrastructure.transcription.base import (
+    TranscriptionResult,
+    TranscriptionServiceBase,
+)
 from src.infrastructure.video.base import FrameExtractorBase
 from src.infrastructure.youtube.base import YouTubeDownloaderBase
 from src.infrastructure.youtube.downloader import DownloadError, VideoNotFoundError
@@ -92,12 +95,17 @@ class VideoIngestionService:
         self._videos_bucket = settings.blob_storage.buckets.videos
         self._frames_bucket = settings.blob_storage.buckets.frames
 
-    async def ingest(  # noqa: PLR0915
+    async def ingest(  # noqa: PLR0912, PLR0915
         self,
         request: IngestVideoRequest,
         progress_callback: Callable[[IngestionProgress], None] | None = None,
     ) -> IngestVideoResponse:
         """Ingest a YouTube video through the complete pipeline.
+
+        Uses blob-first architecture: raw files are uploaded to blob storage
+        immediately after download, making the pipeline resilient to failures.
+        If a failure occurs after upload, the pipeline can resume without
+        re-downloading from YouTube.
 
         Args:
             request: Ingestion request with URL and options.
@@ -145,223 +153,138 @@ class VideoIngestionService:
                     ProcessingStep.VALIDATING,
                 )
 
-            # Check for existing video
+            # Check for existing video - with resume capability
             existing = await self._document_db.find_one(
                 self._videos_collection,
                 {"youtube_id": video_id},
             )
+
             if existing:
-                return await self._build_response_from_existing(existing, started_at)
+                existing_metadata = VideoMetadata(**existing)
+
+                # If already completed, return existing response
+                if existing_metadata.status == VideoStatus.READY:
+                    return await self._build_response_from_existing(
+                        existing, started_at
+                    )
+
+                # Check if we can resume from blob storage
+                if await self._check_raw_blobs_exist(existing_metadata):
+                    report_progress(
+                        ProcessingStep.VALIDATING,
+                        1.0,
+                        0.1,
+                        "Resuming from previous attempt...",
+                    )
+                    return await self._resume_from_status(
+                        existing_metadata, request, report_progress
+                    )
+
+                # Raw blobs don't exist, need to re-download
+                # Delete the incomplete record and start fresh
+                await self._document_db.delete(
+                    self._videos_collection, existing_metadata.id
+                )
 
             report_progress(
                 ProcessingStep.VALIDATING,
                 1.0,
                 0.05,
-                "URL validated, fetching metadata...",
+                "URL validated, starting download...",
             )
 
-            # Step 2: Download video
+            # Phase 1: Download and upload to blob storage (blob-first)
+            video_metadata = await self._download_and_store_raw(
+                request, report_progress
+            )
+
+            # Phase 2: Transcribe from blob
+            video_metadata, transcription = await self._transcribe_from_blob(
+                video_metadata, request.language_hint, report_progress
+            )
+
+            # Phase 3: Extract frames from blob (if requested)
+            frames: list[FrameChunk] = []
+            if request.extract_frames:
+                frames = await self._extract_frames_from_blob(
+                    video_metadata, report_progress
+                )
+
+            # Phase 4: Create transcript chunks
             report_progress(
-                ProcessingStep.DOWNLOADING, 0.0, 0.1, "Downloading video..."
+                ProcessingStep.CHUNKING, 0.0, 0.5, "Creating transcript chunks..."
             )
 
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_path = Path(temp_dir)
+            transcript_chunks = self._create_transcript_chunks(
+                transcription_segments=transcription.segments,
+                video_id=video_metadata.id,
+                language=transcription.language,
+            )
 
-                # Download and get metadata
-                download_result = await self._downloader.download(
-                    url=request.url,
-                    output_dir=temp_path,
-                    max_resolution=request.max_resolution,
+            report_progress(
+                ProcessingStep.CHUNKING,
+                1.0,
+                0.6,
+                f"Created {len(transcript_chunks)} transcript chunks",
+            )
+
+            # Phase 5: Generate embeddings
+            report_progress(
+                ProcessingStep.EMBEDDING, 0.0, 0.6, "Generating embeddings..."
+            )
+
+            video_metadata = video_metadata.model_copy(
+                update={"status": VideoStatus.EMBEDDING}
+            )
+            await self._update_video_status(video_metadata)
+
+            await self._generate_and_store_embeddings(
+                chunks=transcript_chunks,
+                video_id=video_metadata.id,
+            )
+
+            report_progress(ProcessingStep.EMBEDDING, 1.0, 0.85, "Embeddings complete")
+
+            # Phase 6: Store chunks in document DB
+            report_progress(ProcessingStep.STORING, 0.0, 0.85, "Storing chunks...")
+
+            if transcript_chunks:
+                await self._document_db.insert_many(
+                    self._chunks_collection,
+                    [c.model_dump(mode="json") for c in transcript_chunks],
                 )
 
-                yt_meta = download_result.metadata
-                video_metadata = VideoMetadata(
-                    youtube_id=yt_meta.id,
-                    youtube_url=request.url,
-                    title=yt_meta.title,
-                    description=yt_meta.description,
-                    duration_seconds=yt_meta.duration_seconds,
-                    channel_name=yt_meta.channel_name,
-                    channel_id=yt_meta.channel_id,
-                    upload_date=yt_meta.upload_date,
-                    thumbnail_url=yt_meta.thumbnail_url,
-                    status=VideoStatus.DOWNLOADING,
+            if frames:
+                await self._document_db.insert_many(
+                    self._frames_collection,
+                    [f.model_dump(mode="json") for f in frames],
                 )
 
-                # Save initial metadata
-                await self._document_db.insert(
-                    self._videos_collection,
-                    video_metadata.model_dump(mode="json"),
-                )
+            # Update final metadata
+            video_metadata = video_metadata.model_copy(
+                update={
+                    "status": VideoStatus.READY,
+                    "transcript_chunk_count": len(transcript_chunks),
+                    "frame_chunk_count": len(frames),
+                    "updated_at": datetime.now(UTC),
+                }
+            )
+            await self._update_video_status(video_metadata)
 
-                report_progress(
-                    ProcessingStep.DOWNLOADING, 0.5, 0.15, "Uploading to storage..."
-                )
+            report_progress(ProcessingStep.COMPLETED, 1.0, 1.0, "Ingestion complete!")
 
-                # Upload video and audio to blob storage
-                video_blob_path = f"{video_metadata.id}/video.mp4"
-                audio_blob_path = f"{video_metadata.id}/audio.mp3"
-
-                await self._ensure_bucket_exists(self._videos_bucket)
-
-                with download_result.video_path.open("rb") as vf:
-                    await self._blob.upload(
-                        self._videos_bucket,
-                        video_blob_path,
-                        vf.read(),
-                        content_type="video/mp4",
-                    )
-
-                with download_result.audio_path.open("rb") as af:
-                    audio_bytes = af.read()
-                    await self._blob.upload(
-                        self._videos_bucket,
-                        audio_blob_path,
-                        audio_bytes,
-                        content_type="audio/mpeg",
-                    )
-
-                video_metadata = video_metadata.model_copy(
-                    update={
-                        "blob_path_video": video_blob_path,
-                        "blob_path_audio": audio_blob_path,
-                        "status": VideoStatus.TRANSCRIBING,
-                    }
-                )
-                await self._update_video_status(video_metadata)
-
-                report_progress(
-                    ProcessingStep.DOWNLOADING, 1.0, 0.2, "Download complete"
-                )
-
-                # Step 3: Transcribe
-                report_progress(
-                    ProcessingStep.TRANSCRIBING, 0.0, 0.2, "Transcribing audio..."
-                )
-
-                transcription = await self._transcriber.transcribe(
-                    audio_path=str(download_result.audio_path),
-                    language_hint=request.language_hint,
-                    word_timestamps=True,
-                )
-
-                video_metadata = video_metadata.model_copy(
-                    update={
-                        "language": transcription.language,
-                        "status": VideoStatus.EXTRACTING,
-                    }
-                )
-                await self._update_video_status(video_metadata)
-
-                report_progress(
-                    ProcessingStep.TRANSCRIBING, 1.0, 0.4, "Transcription complete"
-                )
-
-                # Step 4: Extract frames (if requested)
-                frames: list[FrameChunk] = []
-                if request.extract_frames:
-                    report_progress(
-                        ProcessingStep.EXTRACTING_FRAMES,
-                        0.0,
-                        0.4,
-                        "Extracting frames...",
-                    )
-
-                    frames = await self._extract_frames(
-                        video_path=download_result.video_path,
-                        video_id=video_metadata.id,
-                        duration_seconds=video_metadata.duration_seconds,
-                    )
-
-                    report_progress(
-                        ProcessingStep.EXTRACTING_FRAMES,
-                        1.0,
-                        0.5,
-                        f"Extracted {len(frames)} frames",
-                    )
-
-                # Step 5: Create transcript chunks
-                report_progress(
-                    ProcessingStep.CHUNKING, 0.0, 0.5, "Creating transcript chunks..."
-                )
-
-                transcript_chunks = self._create_transcript_chunks(
-                    transcription_segments=transcription.segments,
-                    video_id=video_metadata.id,
-                    language=transcription.language,
-                )
-
-                report_progress(
-                    ProcessingStep.CHUNKING,
-                    1.0,
-                    0.6,
-                    f"Created {len(transcript_chunks)} transcript chunks",
-                )
-
-                # Step 6: Generate embeddings
-                report_progress(
-                    ProcessingStep.EMBEDDING, 0.0, 0.6, "Generating embeddings..."
-                )
-
-                video_metadata = video_metadata.model_copy(
-                    update={"status": VideoStatus.EMBEDDING}
-                )
-                await self._update_video_status(video_metadata)
-
-                await self._generate_and_store_embeddings(
-                    chunks=transcript_chunks,
-                    video_id=video_metadata.id,
-                )
-
-                report_progress(
-                    ProcessingStep.EMBEDDING, 1.0, 0.85, "Embeddings complete"
-                )
-
-                # Step 7: Store chunks in document DB
-                report_progress(ProcessingStep.STORING, 0.0, 0.85, "Storing chunks...")
-
-                # Store transcript chunks
-                if transcript_chunks:
-                    await self._document_db.insert_many(
-                        self._chunks_collection,
-                        [c.model_dump(mode="json") for c in transcript_chunks],
-                    )
-
-                # Store frame chunks
-                if frames:
-                    await self._document_db.insert_many(
-                        self._frames_collection,
-                        [f.model_dump(mode="json") for f in frames],
-                    )
-
-                # Update final metadata
-                video_metadata = video_metadata.model_copy(
-                    update={
-                        "status": VideoStatus.READY,
-                        "transcript_chunk_count": len(transcript_chunks),
-                        "frame_chunk_count": len(frames),
-                        "updated_at": datetime.now(UTC),
-                    }
-                )
-                await self._update_video_status(video_metadata)
-
-                report_progress(
-                    ProcessingStep.COMPLETED, 1.0, 1.0, "Ingestion complete!"
-                )
-
-                return IngestVideoResponse(
-                    video_id=video_metadata.id,
-                    youtube_id=video_metadata.youtube_id,
-                    title=video_metadata.title,
-                    duration_seconds=video_metadata.duration_seconds,
-                    status=IngestionStatus.COMPLETED,
-                    chunk_counts={
-                        "transcript": len(transcript_chunks),
-                        "frame": len(frames),
-                    },
-                    created_at=video_metadata.created_at,
-                )
+            return IngestVideoResponse(
+                video_id=video_metadata.id,
+                youtube_id=video_metadata.youtube_id,
+                title=video_metadata.title,
+                duration_seconds=video_metadata.duration_seconds,
+                status=IngestionStatus.COMPLETED,
+                chunk_counts={
+                    "transcript": len(transcript_chunks),
+                    "frame": len(frames),
+                },
+                created_at=video_metadata.created_at,
+            )
 
         except VideoNotFoundError as e:
             if video_metadata:
@@ -398,6 +321,291 @@ class VideoIngestionService:
         """Mark video as failed."""
         failed_video = video.mark_failed(error)
         await self._update_video_status(failed_video)
+
+    async def _check_raw_blobs_exist(self, video_metadata: VideoMetadata) -> bool:
+        """Check if raw video and audio blobs exist in storage.
+
+        Used to determine if we can resume a failed ingestion without
+        re-downloading from YouTube.
+
+        Args:
+            video_metadata: Video metadata with blob paths.
+
+        Returns:
+            True if both video and audio blobs exist.
+        """
+        if not video_metadata.blob_path_video or not video_metadata.blob_path_audio:
+            return False
+
+        video_exists = await self._blob.exists(
+            self._videos_bucket, video_metadata.blob_path_video
+        )
+        audio_exists = await self._blob.exists(
+            self._videos_bucket, video_metadata.blob_path_audio
+        )
+
+        return video_exists and audio_exists
+
+    async def _download_and_store_raw(
+        self,
+        request: IngestVideoRequest,
+        report_progress: Callable[[ProcessingStep, float, float, str], None],
+    ) -> VideoMetadata:
+        """Download from YouTube and immediately upload to blob storage.
+
+        This is Phase 1 of blob-first architecture: download raw files and
+        upload them to blob storage before any processing. Once uploaded,
+        the pipeline can resume from blob storage if it fails later.
+
+        Args:
+            request: Ingestion request with URL and options.
+            report_progress: Progress callback function.
+
+        Returns:
+            VideoMetadata with blob paths populated.
+        """
+        report_progress(ProcessingStep.DOWNLOADING, 0.0, 0.1, "Downloading video...")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Download from YouTube
+            download_result = await self._downloader.download(
+                url=request.url,
+                output_dir=temp_path,
+                max_resolution=request.max_resolution,
+            )
+
+            # Create metadata from YouTube info
+            yt_meta = download_result.metadata
+            video_metadata = VideoMetadata(
+                youtube_id=yt_meta.id,
+                youtube_url=request.url,
+                title=yt_meta.title,
+                description=yt_meta.description,
+                duration_seconds=yt_meta.duration_seconds,
+                channel_name=yt_meta.channel_name,
+                channel_id=yt_meta.channel_id,
+                upload_date=yt_meta.upload_date,
+                thumbnail_url=yt_meta.thumbnail_url,
+                status=VideoStatus.DOWNLOADING,
+            )
+
+            # Save initial metadata to document DB
+            await self._document_db.insert(
+                self._videos_collection,
+                video_metadata.model_dump(mode="json"),
+            )
+
+            report_progress(
+                ProcessingStep.DOWNLOADING, 0.5, 0.15, "Uploading to storage..."
+            )
+
+            # Define blob paths
+            video_blob_path = f"{video_metadata.id}/video.mp4"
+            audio_blob_path = f"{video_metadata.id}/audio.mp3"
+
+            await self._ensure_bucket_exists(self._videos_bucket)
+
+            # Upload video file (pass file handle, not bytes, for large files)
+            with download_result.video_path.open("rb") as vf:
+                await self._blob.upload(
+                    self._videos_bucket,
+                    video_blob_path,
+                    vf,
+                    content_type="video/mp4",
+                )
+
+            # Upload audio file
+            with download_result.audio_path.open("rb") as af:
+                await self._blob.upload(
+                    self._videos_bucket,
+                    audio_blob_path,
+                    af,
+                    content_type="audio/mpeg",
+                )
+
+            # Update metadata with blob paths
+            video_metadata = video_metadata.model_copy(
+                update={
+                    "blob_path_video": video_blob_path,
+                    "blob_path_audio": audio_blob_path,
+                    "status": VideoStatus.TRANSCRIBING,
+                }
+            )
+            await self._update_video_status(video_metadata)
+
+            report_progress(ProcessingStep.DOWNLOADING, 1.0, 0.2, "Download complete")
+
+        # Temp files deleted here, but raw files are safe in blob storage
+        return video_metadata
+
+    async def _transcribe_from_blob(
+        self,
+        video_metadata: VideoMetadata,
+        language_hint: str | None,
+        report_progress: Callable[[ProcessingStep, float, float, str], None],
+    ) -> tuple[VideoMetadata, TranscriptionResult]:
+        """Download audio from blob and transcribe.
+
+        This is Phase 2 of blob-first architecture: download audio from
+        blob storage to a temp file, transcribe, then clean up.
+
+        Args:
+            video_metadata: Video metadata with audio blob path.
+            language_hint: Optional language hint for transcription.
+            report_progress: Progress callback function.
+
+        Returns:
+            Tuple of updated VideoMetadata and TranscriptionResult.
+        """
+        report_progress(
+            ProcessingStep.TRANSCRIBING,
+            0.0,
+            0.2,
+            "Preparing audio for transcription...",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            audio_local_path = temp_path / "audio.mp3"
+
+            # Download audio from blob to temp file
+            await self._blob.download_to_file(
+                self._videos_bucket,
+                video_metadata.blob_path_audio,  # type: ignore[arg-type]
+                audio_local_path,
+            )
+
+            report_progress(
+                ProcessingStep.TRANSCRIBING, 0.2, 0.25, "Transcribing audio..."
+            )
+
+            # Transcribe
+            transcription = await self._transcriber.transcribe(
+                audio_path=str(audio_local_path),
+                language_hint=language_hint,
+                word_timestamps=True,
+            )
+
+        # Temp file deleted here
+
+        video_metadata = video_metadata.model_copy(
+            update={
+                "language": transcription.language,
+                "status": VideoStatus.EXTRACTING,
+            }
+        )
+        await self._update_video_status(video_metadata)
+
+        report_progress(ProcessingStep.TRANSCRIBING, 1.0, 0.4, "Transcription complete")
+
+        return video_metadata, transcription
+
+    async def _extract_frames_from_blob(
+        self,
+        video_metadata: VideoMetadata,
+        report_progress: Callable[[ProcessingStep, float, float, str], None],
+    ) -> list[FrameChunk]:
+        """Download video from blob and extract frames.
+
+        This is Phase 3 of blob-first architecture: download video from
+        blob storage to a temp file, extract frames, upload them, then clean up.
+
+        Args:
+            video_metadata: Video metadata with video blob path.
+            report_progress: Progress callback function.
+
+        Returns:
+            List of extracted FrameChunks.
+        """
+        report_progress(
+            ProcessingStep.EXTRACTING_FRAMES,
+            0.0,
+            0.4,
+            "Preparing video for frame extraction...",
+        )
+
+        interval = self._settings.chunking.frame.interval_seconds
+        frames: list[FrameChunk] = []
+
+        await self._ensure_bucket_exists(self._frames_bucket)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            video_local_path = temp_path / "video.mp4"
+            frames_output_dir = temp_path / "frames"
+            frames_output_dir.mkdir()
+
+            # Download video from blob to temp file
+            await self._blob.download_to_file(
+                self._videos_bucket,
+                video_metadata.blob_path_video,  # type: ignore[arg-type]
+                video_local_path,
+            )
+
+            report_progress(
+                ProcessingStep.EXTRACTING_FRAMES, 0.2, 0.45, "Extracting frames..."
+            )
+
+            # Extract frames using ffmpeg
+            extracted = await self._frame_extractor.extract_frames(
+                video_path=video_local_path,
+                output_dir=frames_output_dir,
+                interval_seconds=interval,
+            )
+
+            report_progress(
+                ProcessingStep.EXTRACTING_FRAMES, 0.7, 0.48, "Uploading frames..."
+            )
+
+            # Upload frames to blob storage
+            for i, extracted_frame in enumerate(extracted):
+                timestamp = extracted_frame.timestamp
+                if timestamp >= video_metadata.duration_seconds:
+                    break
+
+                blob_path = f"{video_metadata.id}/frames/frame_{i:05d}.jpg"
+                thumb_path = f"{video_metadata.id}/frames/thumb_{i:05d}.jpg"
+
+                with extracted_frame.path.open("rb") as f:
+                    frame_bytes = f.read()
+                    await self._blob.upload(
+                        self._frames_bucket,
+                        blob_path,
+                        frame_bytes,
+                        content_type="image/jpeg",
+                    )
+                    # Use same image as thumbnail for now
+                    await self._blob.upload(
+                        self._frames_bucket,
+                        thumb_path,
+                        frame_bytes,
+                        content_type="image/jpeg",
+                    )
+
+                frame_chunk = FrameChunk(
+                    video_id=video_metadata.id,
+                    frame_number=extracted_frame.frame_number,
+                    start_time=timestamp,
+                    end_time=timestamp + interval,
+                    blob_path=blob_path,
+                    thumbnail_path=thumb_path,
+                    width=extracted_frame.width,
+                    height=extracted_frame.height,
+                )
+                frames.append(frame_chunk)
+
+        # Temp files deleted here
+
+        report_progress(
+            ProcessingStep.EXTRACTING_FRAMES,
+            1.0,
+            0.5,
+            f"Extracted {len(frames)} frames",
+        )
+
+        return frames
 
     async def _extract_frames(
         self,
@@ -613,6 +821,128 @@ class VideoIngestionService:
                 "video": existing.get("video_chunk_count", 0),
             },
             created_at=existing.get("created_at", started_at),
+        )
+
+    async def _resume_from_status(
+        self,
+        video_metadata: VideoMetadata,
+        request: IngestVideoRequest,
+        report_progress: Callable[[ProcessingStep, float, float, str], None],
+    ) -> IngestVideoResponse:
+        """Resume ingestion from the last successful step.
+
+        Determines which step to resume from based on VideoStatus and
+        continues the pipeline from there.
+
+        Args:
+            video_metadata: Video metadata with current status.
+            request: Original ingestion request.
+            report_progress: Progress callback function.
+
+        Returns:
+            IngestVideoResponse after completing remaining steps.
+        """
+        transcription: TranscriptionResult | None = None
+        frames: list[FrameChunk] = []
+
+        # Determine starting point based on status
+        if video_metadata.status in (
+            VideoStatus.DOWNLOADING,
+            VideoStatus.TRANSCRIBING,
+            VideoStatus.FAILED,
+        ):
+            # Need to transcribe (or re-transcribe if failed during transcription)
+            video_metadata, transcription = await self._transcribe_from_blob(
+                video_metadata, request.language_hint, report_progress
+            )
+
+        if video_metadata.status == VideoStatus.EXTRACTING and request.extract_frames:
+            # Extract frames if requested
+            frames = await self._extract_frames_from_blob(
+                video_metadata, report_progress
+            )
+
+        # Continue with chunking, embedding, storing
+        # Note: If we resumed, we may not have transcription data
+        # In that case, we need to re-transcribe to get the segments
+        if transcription is None:
+            # Re-transcribe to get segments for chunking
+            video_metadata, transcription = await self._transcribe_from_blob(
+                video_metadata, request.language_hint, report_progress
+            )
+
+        # Create transcript chunks
+        report_progress(
+            ProcessingStep.CHUNKING, 0.0, 0.5, "Creating transcript chunks..."
+        )
+
+        transcript_chunks = self._create_transcript_chunks(
+            transcription_segments=transcription.segments,
+            video_id=video_metadata.id,
+            language=transcription.language,
+        )
+
+        report_progress(
+            ProcessingStep.CHUNKING,
+            1.0,
+            0.6,
+            f"Created {len(transcript_chunks)} transcript chunks",
+        )
+
+        # Generate embeddings
+        report_progress(ProcessingStep.EMBEDDING, 0.0, 0.6, "Generating embeddings...")
+
+        video_metadata = video_metadata.model_copy(
+            update={"status": VideoStatus.EMBEDDING}
+        )
+        await self._update_video_status(video_metadata)
+
+        await self._generate_and_store_embeddings(
+            chunks=transcript_chunks,
+            video_id=video_metadata.id,
+        )
+
+        report_progress(ProcessingStep.EMBEDDING, 1.0, 0.85, "Embeddings complete")
+
+        # Store chunks in document DB
+        report_progress(ProcessingStep.STORING, 0.0, 0.85, "Storing chunks...")
+
+        if transcript_chunks:
+            await self._document_db.insert_many(
+                self._chunks_collection,
+                [c.model_dump(mode="json") for c in transcript_chunks],
+            )
+
+        if frames:
+            await self._document_db.insert_many(
+                self._frames_collection,
+                [f.model_dump(mode="json") for f in frames],
+            )
+
+        # Update final metadata
+        video_metadata = video_metadata.model_copy(
+            update={
+                "status": VideoStatus.READY,
+                "transcript_chunk_count": len(transcript_chunks),
+                "frame_chunk_count": len(frames),
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        await self._update_video_status(video_metadata)
+
+        report_progress(ProcessingStep.COMPLETED, 1.0, 1.0, "Ingestion complete!")
+
+        return IngestVideoResponse(
+            video_id=video_metadata.id,
+            youtube_id=video_metadata.youtube_id,
+            title=video_metadata.title,
+            duration_seconds=video_metadata.duration_seconds,
+            status=IngestionStatus.COMPLETED,
+            chunk_counts={
+                "transcript": len(transcript_chunks),
+                "frame": len(frames),
+            },
+            created_at=video_metadata.created_at,
         )
 
     async def get_ingestion_status(self, video_id: str) -> IngestVideoResponse | None:

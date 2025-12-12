@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import BinaryIO
 
 
@@ -93,6 +94,29 @@ class BlobStorageBase(ABC):
             Chunks of blob content.
         """
         ...
+
+    @abstractmethod
+    async def download_to_file(
+        self,
+        bucket: str,
+        path: str,
+        local_path: Path,
+        chunk_size: int = 8192,
+    ) -> None:
+        """Download a blob to a local file using streaming.
+
+        This method downloads the blob in chunks to avoid loading
+        the entire file into memory, making it suitable for large files.
+
+        Args:
+            bucket: Source bucket name.
+            path: Path within the bucket.
+            local_path: Local filesystem path to write to.
+            chunk_size: Size of each chunk in bytes.
+
+        Raises:
+            BlobNotFoundError: If blob doesn't exist.
+        """
 
     @abstractmethod
     async def delete(self, bucket: str, path: str) -> bool:

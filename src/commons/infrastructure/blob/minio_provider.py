@@ -5,6 +5,7 @@ import io
 import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import BinaryIO
 
 from minio import Minio
@@ -141,6 +142,33 @@ class MinioBlobStorage(BlobStorageBase):
         finally:
             response.close()
             response.release_conn()
+
+    async def download_to_file(
+        self,
+        bucket: str,
+        path: str,
+        local_path: Path,
+        chunk_size: int = 8192,
+    ) -> None:
+        """Download a blob to a local file using streaming.
+
+        Downloads the blob in chunks to avoid loading the entire file
+        into memory, making it suitable for large video/audio files.
+
+        Args:
+            bucket: Source bucket name.
+            path: Path within the bucket.
+            local_path: Local filesystem path to write to.
+            chunk_size: Size of each chunk in bytes.
+
+        Raises:
+            BlobNotFoundError: If blob doesn't exist.
+        """
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with local_path.open("wb") as f:
+            async for chunk in self.download_stream(bucket, path, chunk_size):
+                f.write(chunk)
 
     async def delete(self, bucket: str, path: str) -> bool:
         """Delete a blob from storage."""
