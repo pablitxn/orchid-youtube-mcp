@@ -13,7 +13,7 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: [ "CMD", "mc", "ready", "local" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -43,35 +43,26 @@ services:
     volumes:
       - mongodb_data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  # Application (optional - for full stack deployment)
-  # app:
-  #   build: .
-  #   container_name: youtube-rag-app
-  #   ports:
-  #     - "8000:8000"
-  #   environment:
-  #     YOUTUBE_RAG__APP__ENVIRONMENT: dev
-  #     YOUTUBE_RAG__BLOB_STORAGE__ENDPOINT: minio:9000
-  #     YOUTUBE_RAG__BLOB_STORAGE__ACCESS_KEY: ${MINIO_ROOT_USER:?Set private local credentials}
-  #     YOUTUBE_RAG__BLOB_STORAGE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set private local credentials}
-  #     YOUTUBE_RAG__VECTOR_DB__HOST: qdrant
-  #     YOUTUBE_RAG__DOCUMENT_DB__HOST: mongodb
-  #     YOUTUBE_RAG__DOCUMENT_DB__USERNAME: ${MONGO_USERNAME:?Set private local credentials}
-  #     YOUTUBE_RAG__DOCUMENT_DB__PASSWORD: ${MONGO_PASSWORD:?Set private local credentials}
-  #   depends_on:
-  #     minio:
-  #       condition: service_healthy
-  #     qdrant:
-  #       condition: service_started
-  #     mongodb:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./config:/app/config:ro
+  # MongoDB Admin UI
+  mongo-express:
+    image: mongo-express:1.0.2-20-alpine3.19
+    container_name: youtube-rag-mongo-express
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USERNAME:?Set private local credentials}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD:?Set private local credentials}
+      ME_CONFIG_MONGODB_URL: mongodb://${MONGO_USERNAME:?Set private local credentials}:${MONGO_PASSWORD:?Set private local credentials}@mongodb:27017/
+      ME_CONFIG_BASICAUTH: "false"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   minio_data:
