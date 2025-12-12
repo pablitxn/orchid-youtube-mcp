@@ -38,8 +38,17 @@ class MongoDBDocumentDB(DocumentDBBase):
         collection: str,
         document: dict[str, Any],
     ) -> str:
-        """Insert a document."""
-        result = await self._db[collection].insert_one(document)
+        """Insert a document.
+
+        If the document has an 'id' field, it will be used as MongoDB's '_id'.
+        This ensures consistency between the domain model ID and MongoDB's ID.
+        """
+        doc = document.copy()
+        # Use the domain model 'id' as MongoDB's '_id' if present
+        if "id" in doc:
+            doc["_id"] = doc.pop("id")
+
+        result = await self._db[collection].insert_one(doc)
         return str(result.inserted_id)
 
     async def insert_many(
@@ -47,11 +56,21 @@ class MongoDBDocumentDB(DocumentDBBase):
         collection: str,
         documents: list[dict[str, Any]],
     ) -> list[str]:
-        """Insert multiple documents."""
+        """Insert multiple documents.
+
+        If documents have an 'id' field, it will be used as MongoDB's '_id'.
+        """
         if not documents:
             return []
 
-        result = await self._db[collection].insert_many(documents)
+        docs = []
+        for document in documents:
+            doc = document.copy()
+            if "id" in doc:
+                doc["_id"] = doc.pop("id")
+            docs.append(doc)
+
+        result = await self._db[collection].insert_many(docs)
         return [str(id_) for id_ in result.inserted_ids]
 
     async def find_by_id(
@@ -59,15 +78,25 @@ class MongoDBDocumentDB(DocumentDBBase):
         collection: str,
         document_id: str,
     ) -> dict[str, Any] | None:
-        """Find a document by ID."""
-        try:
-            obj_id = ObjectId(document_id)
-        except Exception:
-            return None
+        """Find a document by ID.
 
-        doc = await self._db[collection].find_one({"_id": obj_id})
+        Searches by _id field which stores the domain model's 'id'.
+        Returns the document with 'id' field restored.
+        """
+        # First try to find by string _id (our UUID format)
+        doc = await self._db[collection].find_one({"_id": document_id})
+
+        # Fallback to ObjectId for backwards compatibility
+        if doc is None:
+            try:
+                obj_id = ObjectId(document_id)
+                doc = await self._db[collection].find_one({"_id": obj_id})
+            except Exception:
+                pass
+
         if doc:
-            doc["_id"] = str(doc["_id"])
+            # Restore 'id' field from '_id' for domain model compatibility
+            doc["id"] = str(doc.pop("_id"))
             return dict(doc)
         return None
 
@@ -79,7 +108,10 @@ class MongoDBDocumentDB(DocumentDBBase):
         limit: int = 100,
         sort: list[tuple[str, int]] | None = None,
     ) -> list[dict[str, Any]]:
-        """Find documents matching filters."""
+        """Find documents matching filters.
+
+        Returns documents with 'id' field restored from '_id'.
+        """
         cursor = self._db[collection].find(filters)
 
         if sort:
@@ -89,7 +121,8 @@ class MongoDBDocumentDB(DocumentDBBase):
 
         results: list[dict[str, Any]] = []
         async for doc in cursor:
-            doc["_id"] = str(doc["_id"])
+            # Restore 'id' field from '_id' for domain model compatibility
+            doc["id"] = str(doc.pop("_id"))
             results.append(doc)
 
         return results
@@ -99,10 +132,14 @@ class MongoDBDocumentDB(DocumentDBBase):
         collection: str,
         filters: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Find a single document matching filters."""
+        """Find a single document matching filters.
+
+        Returns the document with 'id' field restored from '_id'.
+        """
         doc = await self._db[collection].find_one(filters)
         if doc:
-            doc["_id"] = str(doc["_id"])
+            # Restore 'id' field from '_id' for domain model compatibility
+            doc["id"] = str(doc.pop("_id"))
             return dict(doc)
         return None
 
@@ -112,17 +149,35 @@ class MongoDBDocumentDB(DocumentDBBase):
         document_id: str,
         updates: dict[str, Any],
     ) -> bool:
-        """Update a document."""
+        """Update a document.
+
+        Searches by _id field which stores the domain model's 'id'.
+        If updates contain 'id', it will be converted to '_id'.
+        """
+        # Convert 'id' to '_id' in updates if present
+        update_doc = updates.copy()
+        if "id" in update_doc:
+            update_doc["_id"] = update_doc.pop("id")
+
+        # First try to find by string _id (our UUID format)
+        result = await self._db[collection].update_one(
+            {"_id": document_id},
+            {"$set": update_doc},
+        )
+
+        if result.matched_count > 0:
+            return bool(result.modified_count > 0 or result.matched_count > 0)
+
+        # Fallback to ObjectId for backwards compatibility
         try:
             obj_id = ObjectId(document_id)
+            result = await self._db[collection].update_one(
+                {"_id": obj_id},
+                {"$set": update_doc},
+            )
+            return bool(result.modified_count > 0 or result.matched_count > 0)
         except Exception:
             return False
-
-        result = await self._db[collection].update_one(
-            {"_id": obj_id},
-            {"$set": updates},
-        )
-        return bool(result.modified_count > 0)
 
     async def update_many(
         self,
@@ -142,14 +197,23 @@ class MongoDBDocumentDB(DocumentDBBase):
         collection: str,
         document_id: str,
     ) -> bool:
-        """Delete a document."""
+        """Delete a document.
+
+        Searches by _id field which stores the domain model's 'id'.
+        """
+        # First try to delete by string _id (our UUID format)
+        result = await self._db[collection].delete_one({"_id": document_id})
+
+        if result.deleted_count > 0:
+            return True
+
+        # Fallback to ObjectId for backwards compatibility
         try:
             obj_id = ObjectId(document_id)
+            result = await self._db[collection].delete_one({"_id": obj_id})
+            return bool(result.deleted_count > 0)
         except Exception:
             return False
-
-        result = await self._db[collection].delete_one({"_id": obj_id})
-        return bool(result.deleted_count > 0)
 
     async def delete_many(
         self,

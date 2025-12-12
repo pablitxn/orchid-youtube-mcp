@@ -128,11 +128,13 @@ class YtDlpDownloader(YouTubeDownloaderBase):
             raise DownloadError(url, str(e)) from e
 
         # Extract audio
+        # Use %(ext)s so yt-dlp handles extensions correctly during conversion
+        # FFmpegExtractAudio will download in original format then convert to target
         audio_opts = self._get_base_opts()
         audio_opts.update(
             {
                 "format": "bestaudio/best",
-                "outtmpl": str(audio_path),
+                "outtmpl": str(output_dir / f"{video_id}.%(ext)s"),
                 "postprocessors": [
                     {
                         "key": "FFmpegExtractAudio",
@@ -174,6 +176,7 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         video_id = metadata.id
         audio_path = output_dir / f"{video_id}.{audio_format}"
 
+        # Use %(ext)s so yt-dlp handles extensions correctly during conversion
         opts = self._get_base_opts()
         opts.update(
             {
@@ -198,6 +201,7 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         except yt_dlp.DownloadError as e:
             raise DownloadError(url, str(e)) from e
 
+        # After FFmpegExtractAudio, the file will have the target extension
         return audio_path, metadata
 
     async def get_metadata(self, url: str) -> YouTubeMetadata:

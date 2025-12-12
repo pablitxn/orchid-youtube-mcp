@@ -181,7 +181,8 @@ class VideoIngestionService:
                     )
 
                 # Raw blobs don't exist, need to re-download
-                # Delete the incomplete record and start fresh
+                # Clean up any orphaned blobs and delete the incomplete record
+                await self._cleanup_video_data(existing_metadata)
                 await self._document_db.delete(
                     self._videos_collection, existing_metadata.id
                 )
@@ -321,6 +322,51 @@ class VideoIngestionService:
         """Mark video as failed."""
         failed_video = video.mark_failed(error)
         await self._update_video_status(failed_video)
+
+    async def _cleanup_video_data(self, video: VideoMetadata) -> None:
+        """Clean up all data associated with a video.
+
+        Removes blobs, chunks, and embeddings but NOT the video document itself.
+        Used when restarting a failed ingestion from scratch.
+
+        Args:
+            video: Video metadata to clean up.
+        """
+        try:
+            # Delete blobs in videos bucket
+            video_blobs = await self._blob.list_blobs(
+                self._videos_bucket,
+                prefix=f"{video.id}/",
+            )
+            for blob in video_blobs:
+                await self._blob.delete(self._videos_bucket, blob.path)
+
+            # Delete blobs in frames bucket
+            frame_blobs = await self._blob.list_blobs(
+                self._frames_bucket,
+                prefix=f"{video.id}/",
+            )
+            for blob in frame_blobs:
+                await self._blob.delete(self._frames_bucket, blob.path)
+
+            # Delete chunks from document DB
+            await self._document_db.delete_many(
+                self._chunks_collection,
+                {"video_id": video.id},
+            )
+            await self._document_db.delete_many(
+                self._frames_collection,
+                {"video_id": video.id},
+            )
+
+            # Delete embeddings from vector DB
+            await self._vector_db.delete_by_filter(
+                self._vectors_collection,
+                {"video_id": video.id},
+            )
+        except Exception:
+            # Ignore cleanup errors - best effort
+            pass
 
     async def _check_raw_blobs_exist(self, video_metadata: VideoMetadata) -> bool:
         """Check if raw video and audio blobs exist in storage.
