@@ -145,15 +145,12 @@ class ChunkingService:
             # Advance to next chunk window with overlap
             current_start = chunk_end - overlap_seconds
 
-            # Find the first segment that starts at or after the new window start
-            while segment_idx < len(segments):
-                if segments[segment_idx].start_time >= current_start:
-                    break
-                segment_idx += 1
-
-            # Prevent infinite loop if no progress
-            if segment_idx == temp_idx and segment_idx < len(segments):
-                segment_idx += 1
+            # Rewind segment index for overlap
+            # Use end_time > current_start to include segments that overlap
+            # with the new chunk window, even if they started before current_start
+            while temp_idx > 0 and segments[temp_idx - 1].end_time > current_start:
+                temp_idx -= 1
+            segment_idx = temp_idx
 
         total_words = sum(len(c.word_timestamps) for c in chunks)
         avg_confidence = (

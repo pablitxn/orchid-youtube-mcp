@@ -79,6 +79,17 @@ class QdrantVectorDB(VectorDBBase):
                 distance=distance_map[distance_metric],
             ),
         )
+        # Create payload indexes for efficient filtering
+        await self._client.create_payload_index(
+            collection_name=name,
+            field_name="video_id",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
+        await self._client.create_payload_index(
+            collection_name=name,
+            field_name="modality",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
         return True
 
     async def delete_collection(self, name: str) -> bool:
@@ -97,6 +108,18 @@ class QdrantVectorDB(VectorDBBase):
             return True
         except Exception:
             return False
+
+    async def ensure_payload_indexes(self, collection: str) -> None:
+        """Ensure payload indexes exist for filtering."""
+        import contextlib
+
+        for field in ["video_id", "modality"]:
+            with contextlib.suppress(Exception):
+                await self._client.create_payload_index(
+                    collection_name=collection,
+                    field_name=field,
+                    field_schema=models.PayloadSchemaType.KEYWORD,
+                )
 
     async def upsert(
         self,

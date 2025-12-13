@@ -184,3 +184,15 @@ class VectorDBBase(ABC):
         Returns:
             Health status with latency info.
         """
+
+    async def ensure_payload_indexes(self, collection: str) -> None:
+        """Ensure payload indexes exist for filtering.
+
+        Args:
+            collection: Collection name.
+
+        Note:
+            Default implementation is a no-op. Override in implementations
+            that require explicit index creation (e.g., Qdrant).
+        """
+        _ = collection  # Default no-op implementation

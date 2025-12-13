@@ -1532,9 +1532,11 @@ class VideoIngestionService:
             current_start = max(current_start, 0)
 
             # Rewind segment index for overlap
+            # Use end_time > current_start to include segments that overlap
+            # with the new chunk window, even if they started before current_start
             while (
                 segment_idx > 0
-                and transcription_segments[segment_idx - 1].start_time >= current_start
+                and transcription_segments[segment_idx - 1].end_time > current_start
             ):
                 segment_idx -= 1
 
@@ -1619,6 +1621,9 @@ class VideoIngestionService:
                     },
                 )
                 all_vectors.append(point)
+
+        # Ensure indexes exist for filtering
+        await self._vector_db.ensure_payload_indexes(self._vectors_collection)
 
         # Upsert all vectors
         self._logger.debug(
