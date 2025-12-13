@@ -1,10 +1,12 @@
 """Video query service for semantic search and RAG."""
 
+import asyncio
 import time
 from typing import Any
 
 from src.application.dtos.query import (
     CitationDTO,
+    DecompositionInfo,
     GetSourcesRequest,
     QueryMetadata,
     QueryModality,
@@ -13,11 +15,20 @@ from src.application.dtos.query import (
     SourceArtifact,
     SourceDetail,
     SourcesResponse,
+    SubTaskInfo,
     TimestampRangeDTO,
+)
+from src.application.services.multimodal_message import MultimodalMessageBuilder
+from src.application.services.query_decomposer import (
+    QueryDecomposer,
+    ResultSynthesizer,
+    SubTask,
+    SubTaskResult,
 )
 from src.commons.infrastructure.blob.base import BlobStorageBase
 from src.commons.infrastructure.documentdb.base import DocumentDBBase
 from src.commons.infrastructure.vectordb.base import VectorDBBase
+from src.commons.model_capabilities import ContentType
 from src.commons.settings.models import Settings
 from src.commons.telemetry import LogContext, get_logger
 from src.domain.models.chunk import Modality
@@ -65,6 +76,10 @@ class VideoQueryService:
         self._frames_collection = settings.document_db.collections.frame_chunks
         self._frames_bucket = settings.blob_storage.buckets.frames
 
+        # Agentic components
+        self._decomposer = QueryDecomposer(llm_service)
+        self._synthesizer = ResultSynthesizer(llm_service)
+
     async def query(  # noqa: PLR0915
         self,
         video_id: str,
@@ -82,6 +97,10 @@ class VideoQueryService:
         Raises:
             ValueError: If video not found or not ready.
         """
+        # Use agentic decomposition if enabled
+        if request.enable_decomposition:
+            return await self.query_with_decomposition(video_id, request)
+
         start_time = time.perf_counter()
 
         query_preview = (
@@ -96,6 +115,7 @@ class VideoQueryService:
                 "similarity_threshold": request.similarity_threshold,
                 "modalities": [m.value for m in request.modalities],
                 "include_reasoning": request.include_reasoning,
+                "enable_decomposition": request.enable_decomposition,
             },
         )
 
@@ -239,6 +259,9 @@ class VideoQueryService:
                     },
                 )
 
+            # Get enabled content types from request
+            enabled_content_types = request.enabled_content_types.to_content_types()
+
             # Generate answer with LLM
             self._logger.debug(
                 "Generating answer with LLM",
@@ -246,14 +269,21 @@ class VideoQueryService:
                     "context_chunks_count": len(context_chunks),
                     "video_title": video.get("title", "Unknown"),
                     "include_reasoning": request.include_reasoning,
+                    "enabled_content_types": [ct.value for ct in enabled_content_types],
                 },
             )
             llm_start = time.perf_counter()
-            answer, reasoning, confidence = await self._generate_answer(
+            (
+                answer,
+                reasoning,
+                confidence,
+                content_types_used,
+            ) = await self._generate_answer(
                 query=request.query,
                 context_chunks=context_chunks,
                 video_title=video.get("title", "Unknown"),
                 include_reasoning=request.include_reasoning,
+                enabled_content_types=enabled_content_types,
             )
             llm_time_ms = int((time.perf_counter() - llm_start) * 1000)
 
@@ -264,6 +294,7 @@ class VideoQueryService:
                     "has_reasoning": reasoning is not None,
                     "confidence": confidence,
                     "llm_time_ms": llm_time_ms,
+                    "content_types_used": content_types_used,
                 },
             )
 
@@ -301,6 +332,7 @@ class VideoQueryService:
                     "chunks_analyzed": len(context_chunks),
                     "citations_returned": len(citations),
                     "confidence": confidence,
+                    "content_types_used": content_types_used,
                 },
             )
 
@@ -319,27 +351,32 @@ class VideoQueryService:
                     ],
                     chunks_analyzed=len(context_chunks),
                     processing_time_ms=processing_time_ms,
+                    multimodal_content_used=content_types_used,
                 ),
             )
 
-    async def _generate_answer(
+    async def _generate_answer(  # noqa: PLR0912, PLR0915
         self,
         query: str,
         context_chunks: list[dict[str, Any]],
         video_title: str,
         include_reasoning: bool,
-    ) -> tuple[str, str | None, float]:
-        """Generate answer using LLM.
+        enabled_content_types: set[ContentType] | None = None,
+    ) -> tuple[str, str | None, float, list[str]]:
+        """Generate answer using LLM with optional multimodal content.
 
         Args:
             query: User's question.
             context_chunks: Relevant chunks with scores.
             video_title: Title of the video.
             include_reasoning: Whether to include reasoning.
+            enabled_content_types: Which content types to include in message.
 
         Returns:
-            Tuple of (answer, reasoning, confidence).
+            Tuple of (answer, reasoning, confidence, content_types_used).
         """
+        content_types_used: list[str] = ["text"]
+
         if not context_chunks:
             self._logger.debug(
                 "No context chunks provided, returning no-info response",
@@ -352,83 +389,155 @@ class VideoQueryService:
                 no_info_msg,
                 "No matching content found in the video transcripts or frames.",
                 0.0,
+                content_types_used,
             )
 
-        # Build context from chunks
-        self._logger.debug(
-            "Building context text from chunks",
-            extra={"chunk_count": len(context_chunks)},
+        # Determine content types to use
+        enabled = enabled_content_types or {ContentType.TEXT}
+
+        # Build multimodal message using builder
+        model_id = self._llm.default_model
+        builder = MultimodalMessageBuilder(
+            model_id=model_id,
+            enabled_modalities=enabled,
+            blob_storage=self._blob,
         )
-        context_parts: list[str] = []
-        total_context_chars = 0
-
-        for i, item in enumerate(context_chunks, 1):
-            chunk = item["chunk"]
-            chunk_start_time = chunk.get("start_time", 0)
-            chunk_end_time = chunk.get("end_time", 0)
-            text = chunk.get("text", "")
-            total_context_chars += len(text)
-
-            # Format timestamp
-            start_fmt = self._format_timestamp(chunk_start_time)
-            end_fmt = self._format_timestamp(chunk_end_time)
-
-            context_parts.append(f"[{i}] ({start_fmt} - {end_fmt}): {text}")
-
-            self._logger.debug(
-                f"Context chunk {i}",
-                extra={
-                    "chunk_id": chunk.get("id"),
-                    "start_time": chunk_start_time,
-                    "end_time": chunk_end_time,
-                    "text_length": len(text),
-                    "score": item["score"],
-                },
-            )
-
-        context_text = "\n\n".join(context_parts)
 
         self._logger.debug(
-            "Context text prepared",
+            "Building multimodal context",
             extra={
-                "total_chars": total_context_chars,
-                "context_text_length": len(context_text),
+                "chunk_count": len(context_chunks),
+                "enabled_modalities": [ct.value for ct in enabled],
+                "model": model_id,
             },
         )
 
-        # Build prompt
+        # Add context header
+        builder.add_text("Context from the video:\n")
+
+        # Add context chunks
+        for i, item in enumerate(context_chunks, 1):
+            chunk_data = item["chunk"]
+            score = item["score"]
+
+            # Convert dict to TranscriptChunk for the builder
+            chunk_start_time = chunk_data.get("start_time", 0)
+            chunk_end_time = chunk_data.get("end_time", 0)
+            text = chunk_data.get("text", "")
+
+            # Format as numbered context
+            start_fmt = self._format_timestamp(chunk_start_time)
+            end_fmt = self._format_timestamp(chunk_end_time)
+
+            builder.add_text(
+                f"[{i}] ({start_fmt} - {end_fmt}): {text}",
+                metadata={
+                    "chunk_id": chunk_data.get("id"),
+                    "score": score,
+                },
+            )
+
+            # Vision-augmented: add frames when images enabled
+            if ContentType.IMAGE in enabled and self._blob:
+                modality = chunk_data.get("modality", "transcript")
+
+                if modality == "frame":
+                    # Direct frame chunk - add its image
+                    blob_path = chunk_data.get("blob_path")
+                    if blob_path:
+                        try:
+                            url = await self._blob.generate_presigned_url(
+                                bucket=self._frames_bucket,
+                                path=blob_path,
+                                expiry_seconds=3600,
+                            )
+                            builder.add_image(
+                                url,
+                                metadata={
+                                    "chunk_id": chunk_data.get("id"),
+                                    "timestamp": chunk_start_time,
+                                },
+                            )
+                            if "image" not in content_types_used:
+                                content_types_used.append("image")
+                        except Exception as e:
+                            self._logger.debug(
+                                "Failed to add frame image",
+                                extra={"error": str(e)},
+                            )
+                else:
+                    # Transcript chunk - find nearby frames for visual context
+                    video_id = chunk_data.get("video_id")
+                    if video_id:
+                        nearby_frames = await self._get_frames_near_timestamp(
+                            video_id=video_id,
+                            timestamp=chunk_start_time,
+                            window_seconds=3.0,
+                            max_frames=1,  # 1 frame per transcript chunk
+                        )
+                        for frame in nearby_frames:
+                            blob_path = frame.get("blob_path")
+                            if blob_path:
+                                try:
+                                    url = await self._blob.generate_presigned_url(
+                                        bucket=self._frames_bucket,
+                                        path=blob_path,
+                                        expiry_seconds=3600,
+                                    )
+                                    builder.add_image(
+                                        url,
+                                        metadata={
+                                            "source": "nearby_frame",
+                                            "transcript_chunk": chunk_data.get("id"),
+                                            "timestamp": frame.get("start_time"),
+                                        },
+                                    )
+                                    if "image" not in content_types_used:
+                                        content_types_used.append("image")
+                                except Exception as e:
+                                    self._logger.debug(
+                                        "Failed to add nearby frame",
+                                        extra={"error": str(e)},
+                                    )
+
+            self._logger.debug(
+                f"Context chunk {i} added",
+                extra={
+                    "chunk_id": chunk_data.get("id"),
+                    "start_time": chunk_start_time,
+                    "text_length": len(text),
+                    "score": score,
+                },
+            )
+
+        # Add the question
+        question_text = (
+            f"\n\nQuestion: {query}\n\n"
+            "Please provide a clear, concise answer based on the context above."
+        )
+        if include_reasoning:
+            question_text += "\n\nAlso briefly explain your reasoning."
+
+        builder.add_text(question_text)
+
+        # Build the user message
+        user_message = builder.build_as_llm_message()
+
+        # System prompt
         system_prompt = (
             "You are an assistant that answers questions about video content.\n"
-            f'You have been given transcript excerpts from "{video_title}".\n'
+            f'You have been given excerpts from "{video_title}".\n'
             "Answer the question based ONLY on the provided context.\n"
             "If the context doesn't contain enough information, say so.\n"
             "Always cite the relevant timestamps in your answer."
         )
 
-        user_prompt = f"""Context from the video:
+        if ContentType.IMAGE in enabled:
+            system_prompt += "\nImages from the video are included for visual context."
 
-{context_text}
-
-Question: {query}
-
-Please provide a clear, concise answer based on the context above."""
-
-        if include_reasoning:
-            user_prompt += "\n\nAlso briefly explain your reasoning."
-
-        self._logger.debug(
-            "Prompt prepared for LLM",
-            extra={
-                "system_prompt_length": len(system_prompt),
-                "user_prompt_length": len(user_prompt),
-                "include_reasoning": include_reasoning,
-            },
-        )
-
-        # Generate response
         messages = [
             Message(role=MessageRole.SYSTEM, content=system_prompt),
-            Message(role=MessageRole.USER, content=user_prompt),
+            user_message,
         ]
 
         self._logger.debug(
@@ -437,12 +546,14 @@ Please provide a clear, concise answer based on the context above."""
                 "temperature": 0.3,
                 "max_tokens": 1024,
                 "message_count": len(messages),
+                "has_images": user_message.images is not None,
+                "image_count": len(user_message.images) if user_message.images else 0,
             },
         )
 
         response = await self._llm.generate(
             messages=messages,
-            temperature=0.3,  # Lower temperature for factual answers
+            temperature=0.3,
             max_tokens=1024,
         )
 
@@ -451,7 +562,6 @@ Please provide a clear, concise answer based on the context above."""
             extra={
                 "response_length": len(response.content),
                 "model": getattr(response, "model", "unknown"),
-                "tokens_used": getattr(response, "usage", None),
             },
         )
 
@@ -464,31 +574,20 @@ Please provide a clear, concise answer based on the context above."""
             if len(parts) == 2:
                 content = parts[0].strip()
                 reasoning = parts[1].strip()
-                self._logger.debug(
-                    "Reasoning extracted from response",
-                    extra={
-                        "answer_length": len(content),
-                        "reasoning_length": len(reasoning),
-                    },
-                )
 
-        # Calculate confidence based on average relevance scores
+        # Calculate confidence
         avg_score = sum(item["score"] for item in context_chunks) / len(context_chunks)
-        confidence = min(avg_score, 0.95)  # Cap at 0.95
+        confidence = min(avg_score, 0.95)
 
         self._logger.debug(
-            "Confidence calculated",
+            "Answer generated",
             extra={
-                "avg_score": avg_score,
-                "capped_confidence": confidence,
-                "score_range": {
-                    "min": min(item["score"] for item in context_chunks),
-                    "max": max(item["score"] for item in context_chunks),
-                },
+                "confidence": confidence,
+                "content_types_used": content_types_used,
             },
         )
 
-        return content, reasoning, confidence
+        return content, reasoning, confidence, content_types_used
 
     def _build_citations(
         self,
@@ -876,3 +975,313 @@ Please provide a clear, concise answer based on the context above."""
         if hours > 0:
             return f"{hours:02d}:{minutes:02d}:{secs:02d}"
         return f"{minutes:02d}:{secs:02d}"
+
+    # =========================================================================
+    # Agentic Query Methods
+    # =========================================================================
+
+    async def query_with_decomposition(
+        self,
+        video_id: str,
+        request: QueryVideoRequest,
+    ) -> QueryVideoResponse:
+        """Query using agentic decomposition for complex questions.
+
+        Decomposes the query into subtasks, executes them, and synthesizes.
+
+        Args:
+            video_id: ID of the video to query.
+            request: Query request.
+
+        Returns:
+            Response with synthesized answer and citations.
+        """
+        start_time = time.perf_counter()
+
+        self._logger.info(
+            "Starting decomposed query",
+            extra={"video_id": video_id, "query": request.query[:100]},
+        )
+
+        # Verify video exists
+        video = await self._document_db.find_by_id(self._videos_collection, video_id)
+        if not video:
+            raise ValueError(f"Video not found: {video_id}")
+        if video.get("status") != "ready":
+            raise ValueError(f"Video not ready: {video.get('status')}")
+
+        # Decompose the query
+        decomposition = await self._decomposer.decompose(request.query)
+
+        self._logger.info(
+            "Query decomposed",
+            extra={
+                "is_simple": decomposition.is_simple,
+                "subtask_count": len(decomposition.subtasks),
+            },
+        )
+
+        # Execute subtasks
+        results = await self._execute_subtasks(
+            video_id=video_id,
+            subtasks=decomposition.subtasks,
+            similarity_threshold=request.similarity_threshold,
+            max_results_per_subtask=request.max_citations,
+        )
+
+        # Synthesize results
+        answer, confidence = await self._synthesizer.synthesize(
+            original_query=request.query,
+            results=results,
+            video_title=video.get("title", "Unknown"),
+        )
+
+        # Collect all chunks for citations
+        all_chunks: list[dict[str, Any]] = []
+        for result in results:
+            if result.success:
+                for i, chunk in enumerate(result.chunks):
+                    score = result.scores[i] if i < len(result.scores) else 0.0
+                    all_chunks.append({"chunk": chunk, "score": score})
+
+        # Sort by score and take top N
+        all_chunks.sort(key=lambda x: x["score"], reverse=True)
+        top_chunks = all_chunks[: request.max_citations]
+
+        # Build citations
+        citations = self._build_citations(top_chunks, video)
+
+        # Build decomposition info
+        subtask_infos = [
+            SubTaskInfo(
+                id=result.subtask_id,
+                sub_query=result.sub_query,
+                target_modality=result.modality.value,
+                chunks_found=len(result.chunks),
+                success=result.success,
+            )
+            for result in results
+        ]
+
+        processing_time_ms = int((time.perf_counter() - start_time) * 1000)
+
+        self._logger.info(
+            "Decomposed query completed",
+            extra={
+                "total_time_ms": processing_time_ms,
+                "subtasks_executed": len(results),
+                "total_chunks": len(all_chunks),
+                "confidence": confidence,
+            },
+        )
+
+        return QueryVideoResponse(
+            answer=answer,
+            reasoning=decomposition.reasoning,
+            confidence=confidence,
+            citations=citations,
+            query_metadata=QueryMetadata(
+                video_id=video_id,
+                video_title=video.get("title", "Unknown"),
+                modalities_searched=[QueryModality(r.modality.value) for r in results],
+                chunks_analyzed=len(all_chunks),
+                processing_time_ms=processing_time_ms,
+                decomposition=DecompositionInfo(
+                    was_decomposed=not decomposition.is_simple,
+                    subtask_count=len(decomposition.subtasks),
+                    subtasks=subtask_infos,
+                    reasoning=decomposition.reasoning,
+                ),
+            ),
+        )
+
+    async def _execute_subtasks(
+        self,
+        video_id: str,
+        subtasks: list[SubTask],
+        similarity_threshold: float,
+        max_results_per_subtask: int,
+    ) -> list[SubTaskResult]:
+        """Execute subtasks, respecting dependencies.
+
+        Args:
+            video_id: Video to search.
+            subtasks: Subtasks to execute.
+            similarity_threshold: Minimum similarity score.
+            max_results_per_subtask: Max results per subtask.
+
+        Returns:
+            List of subtask results.
+        """
+        # Get execution order (waves of parallel tasks)
+        waves = self._decomposer.get_execution_order(subtasks)
+        results: list[SubTaskResult] = []
+
+        for wave in waves:
+            # Execute wave in parallel
+            wave_tasks = [
+                self._execute_single_subtask(
+                    video_id=video_id,
+                    subtask=st,
+                    similarity_threshold=similarity_threshold,
+                    max_results=max_results_per_subtask,
+                )
+                for st in wave
+            ]
+            wave_results = await asyncio.gather(*wave_tasks)
+            results.extend(wave_results)
+
+        return results
+
+    async def _execute_single_subtask(
+        self,
+        video_id: str,
+        subtask: SubTask,
+        similarity_threshold: float,
+        max_results: int,
+    ) -> SubTaskResult:
+        """Execute a single subtask.
+
+        Args:
+            video_id: Video to search.
+            subtask: The subtask to execute.
+            similarity_threshold: Minimum similarity.
+            max_results: Maximum results.
+
+        Returns:
+            SubTaskResult with chunks and scores.
+        """
+        self._logger.debug(
+            "Executing subtask",
+            extra={
+                "subtask_id": subtask.id,
+                "sub_query": subtask.sub_query,
+                "modality": subtask.target_modality.value,
+            },
+        )
+
+        try:
+            # Generate embedding for subtask query
+            embeddings = await self._embedder.embed_texts([subtask.sub_query])
+            if not embeddings:
+                return SubTaskResult(
+                    subtask_id=subtask.id,
+                    sub_query=subtask.sub_query,
+                    modality=subtask.target_modality,
+                    chunks=[],
+                    scores=[],
+                    success=False,
+                    error="Failed to generate embedding",
+                )
+
+            query_vector = embeddings[0].vector
+
+            # Select collection based on modality
+            collection = self._get_collection_for_modality(subtask.target_modality)
+            chunks_collection = self._get_chunks_collection_for_modality(
+                subtask.target_modality
+            )
+
+            # Search
+            search_results = await self._vector_db.search(
+                collection=collection,
+                query_vector=query_vector,
+                limit=max_results,
+                score_threshold=similarity_threshold,
+                filters={"video_id": video_id},
+            )
+
+            # Fetch chunk documents
+            chunks: list[dict[str, Any]] = []
+            scores: list[float] = []
+
+            for result in search_results:
+                chunk_id = result.payload.get("chunk_id")
+                if chunk_id:
+                    chunk = await self._document_db.find_by_id(
+                        chunks_collection, chunk_id
+                    )
+                    if chunk:
+                        chunks.append(chunk)
+                        scores.append(result.score)
+
+            self._logger.debug(
+                "Subtask completed",
+                extra={
+                    "subtask_id": subtask.id,
+                    "chunks_found": len(chunks),
+                },
+            )
+
+            return SubTaskResult(
+                subtask_id=subtask.id,
+                sub_query=subtask.sub_query,
+                modality=subtask.target_modality,
+                chunks=chunks,
+                scores=scores,
+                success=True,
+            )
+
+        except Exception as e:
+            self._logger.warning(
+                "Subtask failed",
+                extra={"subtask_id": subtask.id, "error": str(e)},
+            )
+            return SubTaskResult(
+                subtask_id=subtask.id,
+                sub_query=subtask.sub_query,
+                modality=subtask.target_modality,
+                chunks=[],
+                scores=[],
+                success=False,
+                error=str(e),
+            )
+
+    def _get_collection_for_modality(self, modality: Modality) -> str:
+        """Get vector collection name for a modality."""
+        collections = {
+            Modality.TRANSCRIPT: self._settings.vector_db.collections.transcripts,
+            Modality.FRAME: self._settings.vector_db.collections.frames,
+        }
+        return collections.get(modality, self._vectors_collection)
+
+    def _get_chunks_collection_for_modality(self, modality: Modality) -> str:
+        """Get document collection name for a modality."""
+        collections = {
+            Modality.TRANSCRIPT: self._chunks_collection,
+            Modality.FRAME: self._frames_collection,
+        }
+        return collections.get(modality, self._chunks_collection)
+
+    async def _get_frames_near_timestamp(
+        self,
+        video_id: str,
+        timestamp: float,
+        window_seconds: float = 5.0,
+        max_frames: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Get frames near a timestamp for vision-augmented context.
+
+        Args:
+            video_id: Video ID.
+            timestamp: Center timestamp in seconds.
+            window_seconds: Time window around timestamp.
+            max_frames: Maximum frames to return.
+
+        Returns:
+            List of frame chunk documents.
+        """
+        start = max(0, timestamp - window_seconds)
+        end = timestamp + window_seconds
+
+        frames = await self._document_db.find(
+            self._frames_collection,
+            {
+                "video_id": video_id,
+                "start_time": {"$gte": start, "$lte": end},
+            },
+            sort=[("start_time", 1)],
+            limit=max_frames,
+        )
+
+        return list(frames)

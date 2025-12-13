@@ -5,6 +5,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from src.commons.model_capabilities import ContentType
+
 
 class QueryModality(str, Enum):
     """Modalities available for querying."""
@@ -13,6 +15,26 @@ class QueryModality(str, Enum):
     FRAME = "frame"
     AUDIO = "audio"
     VIDEO = "video"
+
+
+class EnabledContentTypes(BaseModel):
+    """Content types to include in LLM messages."""
+
+    text: bool = Field(default=True, description="Always include text")
+    image: bool = Field(default=False, description="Include images from frames")
+    audio: bool = Field(default=False, description="Include audio clips")
+    video: bool = Field(default=False, description="Include video segments")
+
+    def to_content_types(self) -> set[ContentType]:
+        """Convert to set of ContentType."""
+        types = {ContentType.TEXT}
+        if self.image:
+            types.add(ContentType.IMAGE)
+        if self.audio:
+            types.add(ContentType.AUDIO)
+        if self.video:
+            types.add(ContentType.VIDEO)
+        return types
 
 
 class TimestampRangeDTO(BaseModel):
@@ -45,6 +67,31 @@ class CitationDTO(BaseModel):
     )
 
 
+class SubTaskInfo(BaseModel):
+    """Information about a decomposed subtask."""
+
+    id: int = Field(description="Subtask identifier")
+    sub_query: str = Field(description="The subtask query")
+    target_modality: str = Field(description="Target modality for search")
+    chunks_found: int = Field(description="Number of chunks found")
+    success: bool = Field(description="Whether subtask succeeded")
+
+
+class DecompositionInfo(BaseModel):
+    """Information about query decomposition."""
+
+    was_decomposed: bool = Field(description="Whether query was decomposed")
+    subtask_count: int = Field(default=0, description="Number of subtasks")
+    subtasks: list[SubTaskInfo] = Field(
+        default_factory=list,
+        description="Details of each subtask",
+    )
+    reasoning: str | None = Field(
+        default=None,
+        description="Why decomposition was/wasn't used",
+    )
+
+
 class QueryMetadata(BaseModel):
     """Metadata about the query execution."""
 
@@ -55,6 +102,14 @@ class QueryMetadata(BaseModel):
     )
     chunks_analyzed: int = Field(description="Number of chunks analyzed")
     processing_time_ms: int = Field(description="Total processing time in milliseconds")
+    decomposition: DecompositionInfo | None = Field(
+        default=None,
+        description="Query decomposition info if enabled",
+    )
+    multimodal_content_used: list[str] = Field(
+        default_factory=list,
+        description="Content types used in LLM context",
+    )
 
 
 class QueryVideoRequest(BaseModel):
@@ -84,6 +139,15 @@ class QueryVideoRequest(BaseModel):
         ge=0.0,
         le=1.0,
         description="Minimum similarity score for results",
+    )
+    # Agentic features
+    enable_decomposition: bool = Field(
+        default=False,
+        description="Enable query decomposition for complex questions",
+    )
+    enabled_content_types: EnabledContentTypes = Field(
+        default_factory=EnabledContentTypes,
+        description="Content types to include in LLM context (multimodal)",
     )
 
 
