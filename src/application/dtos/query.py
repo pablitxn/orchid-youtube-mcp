@@ -135,7 +135,7 @@ class QueryVideoRequest(BaseModel):
         description="Whether to include explanation of reasoning",
     )
     similarity_threshold: float = Field(
-        default=0.5,
+        default=0.3,
         ge=0.0,
         le=1.0,
         description="Minimum similarity score for results",
@@ -261,7 +261,7 @@ class CrossVideoRequest(BaseModel):
         description="Maximum citations per video",
     )
     similarity_threshold: float = Field(
-        default=0.5,
+        default=0.3,
         ge=0.0,
         le=1.0,
         description="Minimum similarity score",

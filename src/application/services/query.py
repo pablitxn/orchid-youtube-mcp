@@ -213,6 +213,7 @@ class VideoQueryService:
                     "filter_video_id": video_id,
                 },
             )
+
             search_start = time.perf_counter()
             search_results = await self._vector_db.search(
                 collection=self._vectors_collection,
