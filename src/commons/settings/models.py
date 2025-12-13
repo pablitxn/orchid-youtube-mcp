@@ -1,5 +1,6 @@
 """Pydantic settings models for application configuration."""
 
+from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -191,10 +192,30 @@ class ChunkingSettings(BaseModel):
     video: VideoChunkingSettings = Field(default_factory=VideoChunkingSettings)
 
 
+class FrameEmbeddingStrategy(str, Enum):
+    """Strategy for embedding/indexing frames for search."""
+
+    # Frames → Vision LLM describes → Embed description text → Vector search
+    FRAME_DESCRIPTION_EMBEDDING = "frame_description_embedding"
+
+    # Frames → Inject directly into LLM at query time (no vector search)
+    FRAME_DIRECT_INJECTION = "frame_direct_injection"
+
+    # Frames → CLIP/multimodal embedding → Vector search
+    CLIP_EMBEDDING = "clip_embedding"
+
+    # Combine multiple strategies
+    HYBRID = "hybrid"
+
+
 class VisualQuerySettings(BaseModel):
     """Visual query configuration for frame-based search."""
 
     enabled: bool = True
+    frame_embedding_strategy: FrameEmbeddingStrategy = Field(
+        default=FrameEmbeddingStrategy.FRAME_DESCRIPTION_EMBEDDING,
+        description="Strategy for indexing frames for semantic search",
+    )
     max_frames_per_query: int = Field(
         default=5,
         ge=1,

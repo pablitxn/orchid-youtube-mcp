@@ -42,7 +42,7 @@ from src.commons.infrastructure.blob.base import BlobStorageBase
 from src.commons.infrastructure.documentdb.base import DocumentDBBase
 from src.commons.infrastructure.vectordb.base import VectorDBBase
 from src.commons.model_capabilities import ContentType
-from src.commons.settings.models import Settings
+from src.commons.settings.models import FrameEmbeddingStrategy, Settings
 from src.commons.telemetry import LogContext, get_logger
 from src.domain.models.chunk import Modality
 from src.infrastructure.embeddings.base import EmbeddingServiceBase
@@ -102,7 +102,7 @@ class VideoQueryService:
             vector_db=vector_db,
         )
 
-    async def query(  # noqa: PLR0915
+    async def query(  # noqa: PLR0912, PLR0915
         self,
         video_id: str,
         request: QueryVideoRequest,
@@ -221,6 +221,15 @@ class VideoQueryService:
             )
 
             # Search for relevant chunks
+            strategy = self._settings.query.visual.frame_embedding_strategy
+            self._logger.warning(
+                f"=== QUERY SEARCH START === strategy={strategy.value}",
+                extra={
+                    "query": request.query[:100],
+                    "video_id": video_id,
+                },
+            )
+
             self._logger.debug(
                 "Searching vector database for relevant chunks",
                 extra={
@@ -228,24 +237,65 @@ class VideoQueryService:
                     "limit": request.max_citations * 2,
                     "score_threshold": request.similarity_threshold,
                     "filter_video_id": video_id,
+                    "frame_strategy": strategy.value,
                 },
             )
 
             search_start = time.perf_counter()
-            search_results = await self._vector_db.search(
+
+            # Search transcripts
+            transcript_results = await self._vector_db.search(
                 collection=self._vectors_collection,
                 query_vector=query_vector,
-                limit=request.max_citations * 2,  # Get extra for filtering
+                limit=request.max_citations * 2,
                 score_threshold=request.similarity_threshold,
                 filters={"video_id": video_id},
             )
+            self._logger.warning(
+                f"Transcript search: {len(transcript_results)} results"
+            )
+
+            # Search frame descriptions if strategy uses them
+            frame_results = []
+            if strategy in (
+                FrameEmbeddingStrategy.FRAME_DESCRIPTION_EMBEDDING,
+                FrameEmbeddingStrategy.HYBRID,
+            ):
+                frames_collection = self._settings.vector_db.collections.frames
+                try:
+                    frame_results = await self._vector_db.search(
+                        collection=frames_collection,
+                        query_vector=query_vector,
+                        limit=request.max_citations,
+                        score_threshold=request.similarity_threshold,
+                        filters={"video_id": video_id},
+                    )
+                    self._logger.warning(
+                        f"Frame description search: {len(frame_results)} results "
+                        f"(collection={frames_collection})"
+                    )
+                    for i, fr in enumerate(frame_results[:5]):
+                        self._logger.warning(
+                            f"  Frame result {i}: score={fr.score:.3f}, "
+                            f"preview={fr.payload.get('text_preview', '')[:80]}..."
+                        )
+                except Exception as e:
+                    self._logger.warning(
+                        f"Frame search failed (collection may not exist): {e}"
+                    )
+
+            # Combine and sort by score
+            search_results = transcript_results + frame_results
+            search_results.sort(key=lambda x: x.score, reverse=True)
+
             search_time_ms = int((time.perf_counter() - search_start) * 1000)
 
             top_scores = [r.score for r in search_results[:5]] if search_results else []
-            self._logger.debug(
-                "Vector search completed",
+            self._logger.warning(
+                f"Combined search: {len(search_results)} total results",
                 extra={
-                    "results_count": len(search_results),
+                    "transcript_results": len(transcript_results),
+                    "frame_results": len(frame_results),
                     "search_time_ms": search_time_ms,
                     "top_scores": top_scores,
                 },
@@ -256,20 +306,34 @@ class VideoQueryService:
             context_chunks: list[dict[str, Any]] = []
             chunks_fetched = 0
             chunks_not_found = 0
+            frames_fetched = 0
 
             for result in search_results:
                 chunk_id = result.payload.get("chunk_id")
+                modality = result.payload.get("modality", "transcript")
+
                 if chunk_id:
-                    chunk = await self._document_db.find_by_id(
-                        self._chunks_collection,
-                        chunk_id,
-                    )
+                    # Determine which collection to search based on modality
+                    if modality == Modality.FRAME.value:
+                        chunk = await self._document_db.find_by_id(
+                            self._frames_collection,
+                            chunk_id,
+                        )
+                        if chunk:
+                            frames_fetched += 1
+                    else:
+                        chunk = await self._document_db.find_by_id(
+                            self._chunks_collection,
+                            chunk_id,
+                        )
+
                     if chunk:
                         context_chunks.append(
                             {
                                 "chunk": chunk,
                                 "score": result.score,
                                 "payload": result.payload,
+                                "modality": modality,
                             }
                         )
                         chunks_fetched += 1
@@ -277,13 +341,16 @@ class VideoQueryService:
                         chunks_not_found += 1
                         self._logger.debug(
                             "Chunk not found in document DB",
-                            extra={"chunk_id": chunk_id},
+                            extra={"chunk_id": chunk_id, "modality": modality},
                         )
 
-            self._logger.debug(
-                "Context chunks retrieved",
+            transcripts_count = chunks_fetched - frames_fetched
+            self._logger.warning(
+                f"Context built: {chunks_fetched} chunks "
+                f"({frames_fetched} frames, {transcripts_count} transcripts)",
                 extra={
                     "chunks_fetched": chunks_fetched,
+                    "frames_fetched": frames_fetched,
                     "chunks_not_found": chunks_not_found,
                     "total_context_chunks": len(context_chunks),
                 },
@@ -458,54 +525,84 @@ class VideoQueryService:
         for i, item in enumerate(context_chunks, 1):
             chunk_data = item["chunk"]
             score = item["score"]
+            modality = item.get("modality", chunk_data.get("modality", "transcript"))
 
-            # Convert dict to TranscriptChunk for the builder
             chunk_start_time = chunk_data.get("start_time", 0)
             chunk_end_time = chunk_data.get("end_time", 0)
-            text = chunk_data.get("text", "")
-
-            # Format as numbered context
             start_fmt = self._format_timestamp(chunk_start_time)
             end_fmt = self._format_timestamp(chunk_end_time)
 
-            builder.add_text(
-                f"[{i}] ({start_fmt} - {end_fmt}): {text}",
-                metadata={
-                    "chunk_id": chunk_data.get("id"),
-                    "score": score,
-                },
-            )
+            # Handle different modalities
+            if modality == Modality.FRAME.value:
+                # Frame chunk - use description as text
+                description = chunk_data.get("description", "")
+                text = (
+                    f"[FRAME] {description}"
+                    if description
+                    else "[FRAME - no description]"
+                )
 
-            # Vision-augmented: add frames when images enabled
-            if ContentType.IMAGE in enabled and self._blob:
-                modality = chunk_data.get("modality", "transcript")
+                self._logger.warning(
+                    f"Adding frame context [{i}]: {text[:100]}...",
+                    extra={
+                        "frame_id": chunk_data.get("id"),
+                        "frame_number": chunk_data.get("frame_number"),
+                        "has_description": bool(description),
+                        "score": score,
+                    },
+                )
 
-                if modality == "frame":
-                    # Direct frame chunk - add its image
+                builder.add_text(
+                    f"[{i}] ({start_fmt} - {end_fmt}) {text}",
+                    metadata={
+                        "chunk_id": chunk_data.get("id"),
+                        "score": score,
+                        "modality": "frame",
+                    },
+                )
+
+                # Add the actual frame image if images enabled
+                if ContentType.IMAGE in enabled and self._blob:
                     blob_path = chunk_data.get("blob_path")
                     if blob_path:
                         try:
-                            url = await self._blob.generate_presigned_url(
-                                bucket=self._frames_bucket,
-                                path=blob_path,
-                                expiry_seconds=3600,
-                            )
-                            builder.add_image(
-                                url,
-                                metadata={
-                                    "chunk_id": chunk_data.get("id"),
-                                    "timestamp": chunk_start_time,
-                                },
-                            )
-                            if "image" not in content_types_used:
-                                content_types_used.append("image")
+                            # Use base64 for reliability
+                            image_data = await self._get_image_as_base64(blob_path)
+                            if image_data:
+                                builder.add_image(
+                                    image_data,
+                                    metadata={
+                                        "chunk_id": chunk_data.get("id"),
+                                        "timestamp": chunk_start_time,
+                                        "frame_number": chunk_data.get("frame_number"),
+                                    },
+                                )
+                                if "image" not in content_types_used:
+                                    content_types_used.append("image")
+                                frame_num = chunk_data.get("frame_number")
+                                self._logger.warning(
+                                    f"  -> Added frame image for frame {frame_num}"
+                                )
                         except Exception as e:
-                            self._logger.debug(
-                                "Failed to add frame image",
-                                extra={"error": str(e)},
+                            self._logger.warning(
+                                f"Failed to add frame image: {e}",
+                                extra={"blob_path": blob_path},
                             )
-                else:
-                    # Transcript chunk - find nearby frames for visual context
+            else:
+                # Transcript chunk
+                text = chunk_data.get("text", "")
+
+                builder.add_text(
+                    f"[{i}] ({start_fmt} - {end_fmt}): {text}",
+                    metadata={
+                        "chunk_id": chunk_data.get("id"),
+                        "score": score,
+                        "modality": "transcript",
+                    },
+                )
+
+                # Vision-augmented: add nearby frames for transcript chunks
+                if ContentType.IMAGE in enabled and self._blob:
                     video_id = chunk_data.get("video_id")
                     if video_id:
                         vs = self._settings.query.visual
@@ -519,21 +616,22 @@ class VideoQueryService:
                             blob_path = frame.get("blob_path")
                             if blob_path:
                                 try:
-                                    url = await self._blob.generate_presigned_url(
-                                        bucket=self._frames_bucket,
-                                        path=blob_path,
-                                        expiry_seconds=3600,
+                                    image_data = await self._get_image_as_base64(
+                                        blob_path
                                     )
-                                    builder.add_image(
-                                        url,
-                                        metadata={
-                                            "source": "nearby_frame",
-                                            "transcript_chunk": chunk_data.get("id"),
-                                            "timestamp": frame.get("start_time"),
-                                        },
-                                    )
-                                    if "image" not in content_types_used:
-                                        content_types_used.append("image")
+                                    if image_data:
+                                        builder.add_image(
+                                            image_data,
+                                            metadata={
+                                                "source": "nearby_frame",
+                                                "transcript_chunk": chunk_data.get(
+                                                    "id"
+                                                ),
+                                                "timestamp": frame.get("start_time"),
+                                            },
+                                        )
+                                        if "image" not in content_types_used:
+                                            content_types_used.append("image")
                                 except Exception as e:
                                     self._logger.debug(
                                         "Failed to add nearby frame",
@@ -545,7 +643,8 @@ class VideoQueryService:
                 extra={
                     "chunk_id": chunk_data.get("id"),
                     "start_time": chunk_start_time,
-                    "text_length": len(text),
+                    "modality": modality,
+                    "text_length": len(text) if text else 0,
                     "score": score,
                 },
             )

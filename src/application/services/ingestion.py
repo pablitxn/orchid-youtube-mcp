@@ -407,6 +407,10 @@ class VideoIngestionService:
                     "Starting Phase 5: Generating embeddings",
                     extra={
                         "chunk_count": len(transcript_chunks),
+                        "frame_count": len(frames),
+                        "frames_with_descriptions": sum(
+                            1 for f in frames if f.description
+                        ),
                         "embedding_dimensions": self._text_embedder.text_dimensions,
                     },
                 )
@@ -419,10 +423,34 @@ class VideoIngestionService:
                 )
                 await self._update_video_status(video_metadata)
 
+                # Generate embeddings for transcript chunks
                 await self._generate_and_store_embeddings(
                     chunks=transcript_chunks,
                     video_id=video_metadata.id,
                 )
+
+                # Generate embeddings for frame descriptions (if strategy requires it)
+                from src.commons.settings.models import FrameEmbeddingStrategy
+
+                strategy = self._settings.query.visual.frame_embedding_strategy
+                self._logger.info(
+                    f"Frame embedding strategy: {strategy.value}",
+                    extra={"frame_count": len(frames)},
+                )
+
+                if frames and strategy in (
+                    FrameEmbeddingStrategy.FRAME_DESCRIPTION_EMBEDDING,
+                    FrameEmbeddingStrategy.HYBRID,
+                ):
+                    await self._generate_and_store_frame_embeddings(
+                        frames=frames,
+                        video_id=video_metadata.id,
+                    )
+                elif frames:
+                    self._logger.info(
+                        f"Skipping frame description embeddings "
+                        f"(strategy={strategy.value})"
+                    )
 
                 self._logger.info("Phase 5 complete: Embeddings generated and stored")
                 report_progress(
@@ -1741,6 +1769,110 @@ class VideoIngestionService:
         )
         await self._vector_db.upsert(self._vectors_collection, all_vectors)
         self._logger.warning("UPSERT COMPLETE")
+
+    async def _generate_and_store_frame_embeddings(
+        self,
+        frames: list[FrameChunk],
+        video_id: str,
+    ) -> None:
+        """Generate embeddings for frame descriptions and store in vector DB.
+
+        This enables semantic search to find frames based on visual content
+        that has been described by the vision LLM.
+        """
+        # Filter frames that have descriptions
+        frames_with_desc = [f for f in frames if f.description]
+
+        if not frames_with_desc:
+            self._logger.debug(
+                "No frames with descriptions to embed",
+                extra={"total_frames": len(frames)},
+            )
+            return
+
+        self._logger.warning(
+            f"=== EMBEDDING {len(frames_with_desc)} FRAME DESCRIPTIONS ==="
+        )
+
+        # Log all frame descriptions
+        for i, frame in enumerate(frames_with_desc):
+            self._logger.warning(
+                f"FRAME {i} [{frame.start_time:.1f}s] frame#{frame.frame_number}: "
+                f"{frame.description[:200] if frame.description else 'NO DESC'}..."
+            )
+
+        frames_collection = self._settings.vector_db.collections.frames
+
+        # Ensure frame embeddings collection exists
+        collection_exists = await self._vector_db.collection_exists(frames_collection)
+        if not collection_exists:
+            self._logger.debug(
+                "Creating frame embeddings collection",
+                extra={
+                    "collection": frames_collection,
+                    "vector_size": self._text_embedder.text_dimensions,
+                },
+            )
+            await self._vector_db.create_collection(
+                name=frames_collection,
+                vector_size=self._text_embedder.text_dimensions,
+                distance_metric="cosine",
+            )
+
+        # Batch embed descriptions
+        texts = [f.description for f in frames_with_desc if f.description]
+        batch_size = self._text_embedder.max_batch_size
+        total_batches = (len(texts) + batch_size - 1) // batch_size
+
+        self._logger.debug(
+            "Embedding frame descriptions in batches",
+            extra={
+                "total_descriptions": len(texts),
+                "batch_size": batch_size,
+                "total_batches": total_batches,
+            },
+        )
+
+        all_vectors: list[VectorPoint] = []
+
+        for i in range(0, len(texts), batch_size):
+            batch_num = i // batch_size + 1
+            batch_texts = texts[i : i + batch_size]
+            batch_frames = frames_with_desc[i : i + batch_size]
+
+            self._logger.debug(
+                f"Processing frame embedding batch {batch_num}/{total_batches}",
+                extra={"batch_size": len(batch_texts)},
+            )
+
+            embeddings = await self._text_embedder.embed_texts(batch_texts)
+
+            for frame, embedding in zip(batch_frames, embeddings, strict=True):
+                point = VectorPoint(
+                    id=frame.id,
+                    vector=embedding.vector,
+                    payload={
+                        "video_id": video_id,
+                        "chunk_id": frame.id,
+                        "modality": Modality.FRAME.value,
+                        "start_time": frame.start_time,
+                        "end_time": frame.end_time,
+                        "frame_number": frame.frame_number,
+                        "text_preview": (frame.description or "")[:200],
+                        "blob_path": frame.blob_path,
+                    },
+                )
+                all_vectors.append(point)
+
+        # Ensure indexes exist
+        await self._vector_db.ensure_payload_indexes(frames_collection)
+
+        # Upsert all frame vectors
+        self._logger.warning(
+            f"UPSERTING {len(all_vectors)} frame vectors to {frames_collection}"
+        )
+        await self._vector_db.upsert(frames_collection, all_vectors)
+        self._logger.warning("FRAME EMBEDDINGS UPSERT COMPLETE")
 
     async def _build_response_from_existing(
         self,
