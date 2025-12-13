@@ -101,7 +101,7 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         video_path = output_dir / f"{video_id}.{video_format}"
         audio_path = output_dir / f"{video_id}.{audio_format}"
 
-        # Download video
+        # Download the video
         video_opts = self._get_base_opts()
         format_spec = (
             f"bestvideo[height<={max_resolution}]+bestaudio"
