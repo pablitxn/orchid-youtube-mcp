@@ -69,7 +69,7 @@ async def ingest_video_tool(
         url=arguments["youtube_url"],
         language_hint=arguments.get("language_hint"),
         extract_frames=arguments.get("extract_frames", True),
-        extract_audio_chunks=arguments.get("extract_audio_chunks", False),
+        extract_audio_chunks=arguments.get("extract_audio_chunks", True),
         extract_video_chunks=arguments.get("extract_video_chunks", False),
     )
 

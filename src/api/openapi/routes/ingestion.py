@@ -26,7 +26,7 @@ class IngestRequest(BaseModel):
         description="Whether to extract video frames for visual analysis",
     )
     extract_audio_chunks: bool = Field(
-        default=False,
+        default=True,
         description="Whether to create separate audio chunks",
     )
     extract_video_chunks: bool = Field(

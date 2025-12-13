@@ -59,7 +59,7 @@ def create_mcp_server() -> Server:
                         },
                         "extract_audio_chunks": {
                             "type": "boolean",
-                            "default": False,
+                            "default": True,
                             "description": "Create separate audio chunks",
                         },
                         "extract_video_chunks": {
