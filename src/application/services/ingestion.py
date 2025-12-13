@@ -150,7 +150,7 @@ class VideoIngestionService:
                     "step": step.value,
                     "step_progress": step_progress,
                     "overall_progress": overall,
-                    "message": message,
+                    "progress_message": message,
                 },
             )
             if progress_callback:
