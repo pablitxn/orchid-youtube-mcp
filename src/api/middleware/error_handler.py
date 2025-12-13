@@ -96,7 +96,11 @@ def _handle_exception(  # noqa: PLR0911
     if isinstance(exc, APIError):
         logger.warning(
             f"API error: {exc.code}",
-            extra={"code": exc.code, "message": exc.message, "details": exc.details},
+            extra={
+                "error_code": exc.code,
+                "error_message": exc.message,
+                "details": exc.details,
+            },
         )
         return _build_error_response(
             request=request,
