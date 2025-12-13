@@ -7,6 +7,7 @@ from typing import Any
 from src.commons.infrastructure.blob.base import BlobStorageBase
 from src.commons.infrastructure.documentdb.base import DocumentDBBase
 from src.commons.settings.models import BlobStorageSettings, DocumentDBSettings
+from src.commons.telemetry import get_logger
 from src.domain.models.chunk import (
     AnyChunk,
     AudioChunk,
@@ -45,6 +46,7 @@ class VideoStorageService:
         """
         self._blob = blob_storage
         self._doc_db = document_db
+        self._logger = get_logger(__name__)
 
         # Bucket names
         self._videos_bucket = blob_settings.buckets.videos
@@ -65,9 +67,22 @@ class VideoStorageService:
 
     async def ensure_buckets_exist(self) -> None:
         """Ensure all required buckets exist."""
-        for bucket in [self._videos_bucket, self._frames_bucket, self._chunks_bucket]:
+        buckets = [self._videos_bucket, self._frames_bucket, self._chunks_bucket]
+        self._logger.debug(
+            "Ensuring required buckets exist",
+            extra={"buckets": buckets},
+        )
+        created = 0
+        for bucket in buckets:
             if not await self._blob.bucket_exists(bucket):
                 await self._blob.create_bucket(bucket)
+                created += 1
+                self._logger.debug(f"Created bucket: {bucket}")
+        if created > 0:
+            self._logger.info(
+                "Buckets initialized",
+                extra={"created": created, "total": len(buckets)},
+            )
 
     # =========================================================================
     # Video metadata operations
@@ -82,10 +97,24 @@ class VideoStorageService:
         Returns:
             Document ID.
         """
-        return await self._doc_db.insert(
+        self._logger.debug(
+            "Saving video metadata",
+            extra={
+                "video_id": video.id,
+                "youtube_id": video.youtube_id,
+                "title": video.title,
+                "status": video.status.value,
+            },
+        )
+        doc_id = await self._doc_db.insert(
             self._videos_collection,
             video.model_dump(mode="json"),
         )
+        self._logger.info(
+            "Video metadata saved",
+            extra={"video_id": video.id, "doc_id": doc_id},
+        )
+        return doc_id
 
     async def update_video_metadata(self, video: VideoMetadata) -> bool:
         """Update existing video metadata.
@@ -96,11 +125,26 @@ class VideoStorageService:
         Returns:
             True if updated, False if not found.
         """
-        return await self._doc_db.update(
+        self._logger.debug(
+            "Updating video metadata",
+            extra={
+                "video_id": video.id,
+                "status": video.status.value,
+            },
+        )
+        result = await self._doc_db.update(
             self._videos_collection,
             video.id,
             video.model_dump(mode="json"),
         )
+        if result:
+            self._logger.debug("Video metadata updated", extra={"video_id": video.id})
+        else:
+            self._logger.warning(
+                "Video metadata not found for update",
+                extra={"video_id": video.id},
+            )
+        return result
 
     async def get_video_metadata(self, video_id: str) -> VideoMetadata | None:
         """Get video metadata by ID.
@@ -111,9 +155,15 @@ class VideoStorageService:
         Returns:
             Video metadata or None if not found.
         """
+        self._logger.debug("Fetching video metadata", extra={"video_id": video_id})
         doc = await self._doc_db.find_by_id(self._videos_collection, video_id)
         if not doc:
+            self._logger.debug("Video metadata not found", extra={"video_id": video_id})
             return None
+        self._logger.debug(
+            "Video metadata found",
+            extra={"video_id": video_id, "status": doc.get("status")},
+        )
         return VideoMetadata(**doc)
 
     async def get_video_by_youtube_id(self, youtube_id: str) -> VideoMetadata | None:
@@ -125,12 +175,24 @@ class VideoStorageService:
         Returns:
             Video metadata or None if not found.
         """
+        self._logger.debug(
+            "Fetching video by YouTube ID",
+            extra={"youtube_id": youtube_id},
+        )
         doc = await self._doc_db.find_one(
             self._videos_collection,
             {"youtube_id": youtube_id},
         )
         if not doc:
+            self._logger.debug(
+                "Video not found by YouTube ID",
+                extra={"youtube_id": youtube_id},
+            )
             return None
+        self._logger.debug(
+            "Video found by YouTube ID",
+            extra={"youtube_id": youtube_id, "video_id": doc.get("id")},
+        )
         return VideoMetadata(**doc)
 
     async def list_videos(
@@ -149,6 +211,15 @@ class VideoStorageService:
         Returns:
             List of video metadata.
         """
+        self._logger.debug(
+            "Listing videos",
+            extra={
+                "status_filter": status.value if status else None,
+                "skip": skip,
+                "limit": limit,
+            },
+        )
+
         filters: dict[str, Any] = {}
         if status:
             filters["status"] = status.value
@@ -159,6 +230,11 @@ class VideoStorageService:
             skip=skip,
             limit=limit,
             sort=[("created_at", -1)],
+        )
+
+        self._logger.debug(
+            "Videos listed",
+            extra={"count": len(docs)},
         )
 
         return [VideoMetadata(**doc) for doc in docs]
@@ -172,7 +248,22 @@ class VideoStorageService:
         Returns:
             True if deleted, False if not found.
         """
-        return await self._doc_db.delete(self._videos_collection, video_id)
+        self._logger.debug(
+            "Deleting video metadata",
+            extra={"video_id": video_id},
+        )
+        result = await self._doc_db.delete(self._videos_collection, video_id)
+        if result:
+            self._logger.info(
+                "Video metadata deleted",
+                extra={"video_id": video_id},
+            )
+        else:
+            self._logger.warning(
+                "Video metadata not found for deletion",
+                extra={"video_id": video_id},
+            )
+        return result
 
     async def update_video_status(
         self,
@@ -190,6 +281,15 @@ class VideoStorageService:
         Returns:
             True if updated.
         """
+        self._logger.debug(
+            "Updating video status",
+            extra={
+                "video_id": video_id,
+                "new_status": status.value,
+                "has_error": error_message is not None,
+            },
+        )
+
         updates: dict[str, Any] = {
             "status": status.value,
             "updated_at": datetime.now(UTC).isoformat(),
@@ -197,7 +297,14 @@ class VideoStorageService:
         if error_message:
             updates["error_message"] = error_message
 
-        return await self._doc_db.update(self._videos_collection, video_id, updates)
+        result = await self._doc_db.update(self._videos_collection, video_id, updates)
+
+        if result:
+            self._logger.info(
+                "Video status updated",
+                extra={"video_id": video_id, "status": status.value},
+            )
+        return result
 
     # =========================================================================
     # Blob storage operations
@@ -220,6 +327,17 @@ class VideoStorageService:
             Blob path.
         """
         blob_path = f"{video_id}/video{video_path.suffix}"
+        file_size_mb = video_path.stat().st_size / (1024 * 1024)
+
+        self._logger.debug(
+            "Uploading video to blob storage",
+            extra={
+                "video_id": video_id,
+                "blob_path": blob_path,
+                "size_mb": round(file_size_mb, 2),
+                "bucket": self._videos_bucket,
+            },
+        )
 
         with video_path.open("rb") as f:
             await self._blob.upload(
@@ -229,6 +347,10 @@ class VideoStorageService:
                 content_type=content_type,
             )
 
+        self._logger.info(
+            "Video uploaded to blob storage",
+            extra={"video_id": video_id, "blob_path": blob_path},
+        )
         return blob_path
 
     async def upload_audio(
@@ -248,6 +370,17 @@ class VideoStorageService:
             Blob path.
         """
         blob_path = f"{video_id}/audio{audio_path.suffix}"
+        file_size_mb = audio_path.stat().st_size / (1024 * 1024)
+
+        self._logger.debug(
+            "Uploading audio to blob storage",
+            extra={
+                "video_id": video_id,
+                "blob_path": blob_path,
+                "size_mb": round(file_size_mb, 2),
+                "bucket": self._videos_bucket,
+            },
+        )
 
         with audio_path.open("rb") as f:
             await self._blob.upload(
@@ -257,6 +390,10 @@ class VideoStorageService:
                 content_type=content_type,
             )
 
+        self._logger.info(
+            "Audio uploaded to blob storage",
+            extra={"video_id": video_id, "blob_path": blob_path},
+        )
         return blob_path
 
     async def upload_frame(
@@ -277,6 +414,15 @@ class VideoStorageService:
         """
         blob_path = f"{video_id}/frames/frame_{frame_number:05d}.jpg"
         thumb_path = f"{video_id}/frames/thumb_{frame_number:05d}.jpg"
+
+        self._logger.debug(
+            "Uploading frame to blob storage",
+            extra={
+                "video_id": video_id,
+                "frame_number": frame_number,
+                "blob_path": blob_path,
+            },
+        )
 
         with frame_path.open("rb") as f:
             frame_bytes = f.read()
@@ -312,10 +458,19 @@ class VideoStorageService:
         Returns:
             Presigned URL string.
         """
+        expiry = expiry_seconds or self._presigned_expiry
+        self._logger.debug(
+            "Generating presigned URL",
+            extra={
+                "bucket": bucket,
+                "path": path,
+                "expiry_seconds": expiry,
+            },
+        )
         return await self._blob.generate_presigned_url(
             bucket,
             path,
-            expiry_seconds or self._presigned_expiry,
+            expiry,
         )
 
     async def delete_video_blobs(self, video_id: str) -> int:
@@ -327,9 +482,18 @@ class VideoStorageService:
         Returns:
             Number of blobs deleted.
         """
+        self._logger.info(
+            "Deleting video blobs",
+            extra={"video_id": video_id},
+        )
+
         deleted = 0
 
         # Delete from videos bucket
+        self._logger.debug(
+            "Deleting from videos bucket",
+            extra={"bucket": self._videos_bucket},
+        )
         video_blobs = await self._blob.list_blobs(
             self._videos_bucket,
             prefix=f"{video_id}/",
@@ -339,6 +503,10 @@ class VideoStorageService:
                 deleted += 1
 
         # Delete from frames bucket
+        self._logger.debug(
+            "Deleting from frames bucket",
+            extra={"bucket": self._frames_bucket},
+        )
         frame_blobs = await self._blob.list_blobs(
             self._frames_bucket,
             prefix=f"{video_id}/",
@@ -348,6 +516,10 @@ class VideoStorageService:
                 deleted += 1
 
         # Delete from chunks bucket
+        self._logger.debug(
+            "Deleting from chunks bucket",
+            extra={"bucket": self._chunks_bucket},
+        )
         chunk_blobs = await self._blob.list_blobs(
             self._chunks_bucket,
             prefix=f"{video_id}/",
@@ -355,6 +527,11 @@ class VideoStorageService:
         for blob in chunk_blobs:
             if await self._blob.delete(self._chunks_bucket, blob.path):
                 deleted += 1
+
+        self._logger.info(
+            "Video blobs deleted",
+            extra={"video_id": video_id, "deleted_count": deleted},
+        )
 
         return deleted
 
@@ -382,7 +559,13 @@ class VideoStorageService:
             List of document IDs.
         """
         if not chunks:
+            self._logger.debug("No chunks to save")
             return []
+
+        self._logger.debug(
+            "Saving chunks to document database",
+            extra={"total_chunks": len(chunks)},
+        )
 
         # Group by modality for batch insert
         by_modality: dict[Modality, list[AnyChunk]] = {}
@@ -395,8 +578,26 @@ class VideoStorageService:
         for modality, modality_chunks in by_modality.items():
             collection = self._get_chunk_collection(modality)
             docs = [c.model_dump(mode="json") for c in modality_chunks]
+
+            self._logger.debug(
+                f"Inserting {modality.value} chunks",
+                extra={
+                    "modality": modality.value,
+                    "count": len(docs),
+                    "collection": collection,
+                },
+            )
+
             ids = await self._doc_db.insert_many(collection, docs)
             all_ids.extend(ids)
+
+        self._logger.info(
+            "Chunks saved",
+            extra={
+                "total_saved": len(all_ids),
+                "modalities": {m.value: len(c) for m, c in by_modality.items()},
+            },
+        )
 
         return all_ids
 
@@ -415,6 +616,15 @@ class VideoStorageService:
             List of chunks.
         """
         modalities = [modality] if modality else list(Modality)
+
+        self._logger.debug(
+            "Fetching chunks for video",
+            extra={
+                "video_id": video_id,
+                "modality_filter": modality.value if modality else "all",
+            },
+        )
+
         chunks: list[AnyChunk] = []
 
         for mod in modalities:
@@ -430,6 +640,14 @@ class VideoStorageService:
                 chunk = self._doc_to_chunk(doc, mod)
                 if chunk:
                     chunks.append(chunk)
+
+        self._logger.debug(
+            "Chunks fetched for video",
+            extra={
+                "video_id": video_id,
+                "total_chunks": len(chunks),
+            },
+        )
 
         return chunks
 
@@ -458,7 +676,13 @@ class VideoStorageService:
         Returns:
             Number of chunks deleted.
         """
+        self._logger.info(
+            "Deleting chunks for video",
+            extra={"video_id": video_id},
+        )
+
         deleted = 0
+        deleted_by_modality: dict[str, int] = {}
 
         for modality in Modality:
             collection = self._get_chunk_collection(modality)
@@ -467,6 +691,16 @@ class VideoStorageService:
                 {"video_id": video_id},
             )
             deleted += count
+            deleted_by_modality[modality.value] = count
+
+        self._logger.info(
+            "Chunks deleted for video",
+            extra={
+                "video_id": video_id,
+                "total_deleted": deleted,
+                "by_modality": deleted_by_modality,
+            },
+        )
 
         return deleted
 
@@ -484,12 +718,31 @@ class VideoStorageService:
         Returns:
             Chunk or None if not found.
         """
+        self._logger.debug(
+            "Fetching chunk by ID",
+            extra={
+                "chunk_id": chunk_id,
+                "modality": modality.value,
+            },
+        )
+
         collection = self._get_chunk_collection(modality)
         doc = await self._doc_db.find_by_id(collection, chunk_id)
 
         if not doc:
+            self._logger.debug(
+                "Chunk not found",
+                extra={"chunk_id": chunk_id},
+            )
             return None
 
+        self._logger.debug(
+            "Chunk found",
+            extra={
+                "chunk_id": chunk_id,
+                "video_id": doc.get("video_id"),
+            },
+        )
         return self._doc_to_chunk(doc, modality)
 
     # =========================================================================
@@ -505,9 +758,34 @@ class VideoStorageService:
         Returns:
             Dictionary with deletion counts.
         """
+        self._logger.info(
+            "Starting complete video deletion",
+            extra={"video_id": video_id},
+        )
+
+        self._logger.debug("Deleting video blobs")
+        blobs_deleted = await self.delete_video_blobs(video_id)
+
+        self._logger.debug("Deleting video chunks")
+        chunks_deleted = await self.delete_chunks_for_video(video_id)
+
+        self._logger.debug("Deleting video metadata")
+        metadata_deleted = 1 if await self.delete_video_metadata(video_id) else 0
+
         results = {
-            "blobs": await self.delete_video_blobs(video_id),
-            "chunks": await self.delete_chunks_for_video(video_id),
-            "metadata": 1 if await self.delete_video_metadata(video_id) else 0,
+            "blobs": blobs_deleted,
+            "chunks": chunks_deleted,
+            "metadata": metadata_deleted,
         }
+
+        self._logger.info(
+            "Complete video deletion finished",
+            extra={
+                "video_id": video_id,
+                "blobs_deleted": blobs_deleted,
+                "chunks_deleted": chunks_deleted,
+                "metadata_deleted": metadata_deleted,
+            },
+        )
+
         return results

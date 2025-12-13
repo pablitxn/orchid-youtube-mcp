@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.commons.settings.models import ChunkingSettings
+from src.commons.telemetry import get_logger
 from src.domain.models.chunk import (
     AudioChunk,
     FrameChunk,
@@ -51,6 +52,7 @@ class ChunkingService:
         self._frame_extractor = frame_extractor
         self._video_chunker = video_chunker
         self._settings = settings or ChunkingSettings()
+        self._logger = get_logger(__name__)
 
     def create_transcript_chunks(
         self,
@@ -71,7 +73,19 @@ class ChunkingService:
         Returns:
             List of transcript chunks.
         """
+        self._logger.debug(
+            "Starting transcript chunking",
+            extra={
+                "video_id": video_id,
+                "language": language,
+                "segment_count": len(segments),
+                "chunk_seconds": self._settings.transcript.chunk_seconds,
+                "overlap_seconds": self._settings.transcript.overlap_seconds,
+            },
+        )
+
         if not segments:
+            self._logger.debug("No segments provided, returning empty list")
             return []
 
         chunk_seconds = self._settings.transcript.chunk_seconds
@@ -141,6 +155,21 @@ class ChunkingService:
             if segment_idx == temp_idx and segment_idx < len(segments):
                 segment_idx += 1
 
+        total_words = sum(len(c.word_timestamps) for c in chunks)
+        avg_confidence = (
+            sum(c.confidence for c in chunks) / len(chunks) if chunks else 0.0
+        )
+        self._logger.info(
+            "Transcript chunking completed",
+            extra={
+                "video_id": video_id,
+                "chunks_created": len(chunks),
+                "total_words": total_words,
+                "avg_confidence": round(avg_confidence, 3),
+                "time_span_seconds": chunks[-1].end_time if chunks else 0,
+            },
+        )
+
         return chunks
 
     async def extract_frame_chunks(
@@ -162,13 +191,33 @@ class ChunkingService:
             List of frame chunks with paths to extracted images.
         """
         interval = self._settings.frame.interval_seconds
+        expected_frames = int(duration_seconds / interval) + 1
+
+        self._logger.debug(
+            "Starting frame extraction",
+            extra={
+                "video_id": video_id,
+                "video_path": str(video_path),
+                "duration_seconds": duration_seconds,
+                "interval_seconds": interval,
+                "expected_frames": expected_frames,
+                "output_dir": str(output_dir),
+            },
+        )
+
         frames: list[FrameChunk] = []
 
         # Extract frames using ffmpeg
+        self._logger.debug("Calling frame extractor (ffmpeg)")
         extracted = await self._frame_extractor.extract_frames(
             video_path=video_path,
             output_dir=output_dir,
             interval_seconds=interval,
+        )
+
+        self._logger.debug(
+            "Frame extractor returned",
+            extra={"extracted_count": len(extracted)},
         )
 
         for extracted_frame in extracted:
@@ -189,11 +238,22 @@ class ChunkingService:
             )
             frames.append(frame_chunk)
 
+        self._logger.info(
+            "Frame extraction completed",
+            extra={
+                "video_id": video_id,
+                "frames_created": len(frames),
+                "expected_frames": expected_frames,
+                "first_frame_time": frames[0].start_time if frames else None,
+                "last_frame_time": frames[-1].start_time if frames else None,
+            },
+        )
+
         return frames
 
     async def create_audio_chunks(
         self,
-        audio_path: Path,  # noqa: ARG002
+        audio_path: Path,
         video_id: str,
         duration_seconds: float,
         output_dir: Path,
@@ -210,10 +270,21 @@ class ChunkingService:
             List of audio chunks.
         """
         chunk_seconds = self._settings.audio.chunk_seconds
-        chunks: list[AudioChunk] = []
-
-        # Calculate number of chunks needed
         num_chunks = int(duration_seconds / chunk_seconds) + 1
+
+        self._logger.debug(
+            "Starting audio chunking",
+            extra={
+                "video_id": video_id,
+                "audio_path": str(audio_path),
+                "duration_seconds": duration_seconds,
+                "chunk_seconds": chunk_seconds,
+                "expected_chunks": num_chunks,
+                "output_dir": str(output_dir),
+            },
+        )
+
+        chunks: list[AudioChunk] = []
 
         for i in range(num_chunks):
             start_time = i * chunk_seconds
@@ -233,6 +304,15 @@ class ChunkingService:
                 format="mp3",
             )
             chunks.append(chunk)
+
+        self._logger.info(
+            "Audio chunking completed",
+            extra={
+                "video_id": video_id,
+                "chunks_created": len(chunks),
+                "total_duration_seconds": chunks[-1].end_time if chunks else 0,
+            },
+        )
 
         return chunks
 
@@ -255,15 +335,33 @@ class ChunkingService:
             List of video chunks.
         """
         if not self._video_chunker:
+            self._logger.warning(
+                "Video chunker not available, skipping video chunk creation",
+                extra={"video_id": video_id},
+            )
             return []
 
         chunk_seconds = self._settings.video.chunk_seconds
         overlap_seconds = self._settings.video.overlap_seconds
         max_size_mb = self._settings.video.max_size_mb
 
+        self._logger.debug(
+            "Starting video chunking",
+            extra={
+                "video_id": video_id,
+                "video_path": str(video_path),
+                "duration_seconds": duration_seconds,
+                "chunk_seconds": chunk_seconds,
+                "overlap_seconds": overlap_seconds,
+                "max_size_mb": max_size_mb,
+                "output_dir": str(output_dir),
+            },
+        )
+
         chunks: list[VideoChunk] = []
         current_start = 0.0
         chunk_idx = 0
+        skipped_for_size = 0
 
         while current_start < duration_seconds:
             end_time = min(current_start + chunk_seconds, duration_seconds)
@@ -300,10 +398,31 @@ class ChunkingService:
             # Only include if within size limit
             if chunk.is_within_size_limit(max_size_mb):
                 chunks.append(chunk)
+            else:
+                skipped_for_size += 1
+                self._logger.debug(
+                    "Video chunk skipped due to size limit",
+                    extra={
+                        "chunk_idx": chunk_idx,
+                        "size_bytes": size_bytes,
+                        "max_size_mb": max_size_mb,
+                    },
+                )
 
             chunk_idx += 1
             current_start = end_time - overlap_seconds
             current_start = max(current_start, 0)
+
+        self._logger.info(
+            "Video chunking completed",
+            extra={
+                "video_id": video_id,
+                "chunks_created": len(chunks),
+                "chunks_processed": chunk_idx,
+                "skipped_for_size": skipped_for_size,
+                "total_duration_seconds": chunks[-1].end_time if chunks else 0,
+            },
+        )
 
         return chunks
 
@@ -338,6 +457,20 @@ class ChunkingService:
         Returns:
             ChunkingResult with all created chunks.
         """
+        self._logger.info(
+            "Starting full chunking pipeline",
+            extra={
+                "video_id": video_id,
+                "duration_seconds": duration_seconds,
+                "language": language,
+                "segment_count": len(transcription_segments),
+                "include_frames": include_frames,
+                "include_audio": include_audio,
+                "include_video": include_video,
+                "output_dir": str(output_dir),
+            },
+        )
+
         # Create subdirectories
         frames_dir = output_dir / "frames"
         audio_dir = output_dir / "audio"
@@ -348,6 +481,7 @@ class ChunkingService:
         video_dir.mkdir(parents=True, exist_ok=True)
 
         # Create transcript chunks (synchronous)
+        self._logger.debug("Creating transcript chunks")
         transcript_chunks = self.create_transcript_chunks(
             segments=transcription_segments,
             video_id=video_id,
@@ -360,6 +494,7 @@ class ChunkingService:
         video_chunks: list[VideoChunk] = []
 
         if include_frames:
+            self._logger.debug("Extracting frame chunks")
             frame_chunks = await self.extract_frame_chunks(
                 video_path=video_path,
                 video_id=video_id,
@@ -368,6 +503,7 @@ class ChunkingService:
             )
 
         if include_audio:
+            self._logger.debug("Creating audio chunks")
             audio_chunks = await self.create_audio_chunks(
                 audio_path=audio_path,
                 video_id=video_id,
@@ -376,12 +512,30 @@ class ChunkingService:
             )
 
         if include_video:
+            self._logger.debug("Creating video chunks")
             video_chunks = await self.create_video_chunks(
                 video_path=video_path,
                 video_id=video_id,
                 duration_seconds=duration_seconds,
                 output_dir=video_dir,
             )
+
+        self._logger.info(
+            "Full chunking pipeline completed",
+            extra={
+                "video_id": video_id,
+                "transcript_chunks": len(transcript_chunks),
+                "frame_chunks": len(frame_chunks),
+                "audio_chunks": len(audio_chunks),
+                "video_chunks": len(video_chunks),
+                "total_chunks": (
+                    len(transcript_chunks)
+                    + len(frame_chunks)
+                    + len(audio_chunks)
+                    + len(video_chunks)
+                ),
+            },
+        )
 
         return ChunkingResult(
             transcript_chunks=transcript_chunks,
