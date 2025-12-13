@@ -191,6 +191,87 @@ class ChunkingSettings(BaseModel):
     video: VideoChunkingSettings = Field(default_factory=VideoChunkingSettings)
 
 
+class VisualQuerySettings(BaseModel):
+    """Visual query configuration for frame-based search."""
+
+    enabled: bool = True
+    max_frames_per_query: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Maximum frames to include in visual queries",
+    )
+    frame_window_seconds: float = Field(
+        default=5.0,
+        ge=1.0,
+        description="Time window (±seconds) to search for nearby frames",
+    )
+    low_confidence_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Below this score, trigger visual-first search",
+    )
+    visual_keywords: list[str] = Field(
+        default_factory=lambda: [
+            "ver",
+            "mostrar",
+            "pantalla",
+            "consola",
+            "imagen",
+            "texto",
+            "nombre",
+            "número",
+            "código",
+            "escrito",
+            "aparece",
+            "muestra",
+            "dice",
+            "lee",
+            "visual",
+            "see",
+            "show",
+            "screen",
+            "console",
+            "image",
+            "text",
+            "name",
+            "number",
+            "code",
+            "written",
+            "appears",
+            "display",
+            "says",
+            "reads",
+        ],
+        description="Keywords that indicate a visual query",
+    )
+    generate_frame_descriptions: bool = Field(
+        default=True,
+        description="Generate AI descriptions for frames during ingestion",
+    )
+    frame_description_prompt: str = Field(
+        default=(
+            "Describe this video frame in detail. Include: "
+            "1) Any visible text, names, numbers, or code on screen "
+            "2) UI elements and their state "
+            "3) People and their actions "
+            "4) Key visual elements and objects "
+            "Be concise but thorough. Focus especially on readable text."
+        ),
+        description="Prompt for generating frame descriptions",
+    )
+
+
+class QuerySettings(BaseModel):
+    """Query service settings."""
+
+    default_top_k: int = Field(default=5, ge=1, le=50)
+    score_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+    include_reasoning: bool = False
+    visual: VisualQuerySettings = Field(default_factory=VisualQuerySettings)
+
+
 class ProcessingSettings(BaseModel):
     """Video processing settings."""
 
@@ -263,6 +344,7 @@ class Settings(BaseSettings):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
     processing: ProcessingSettings = Field(default_factory=ProcessingSettings)
+    query: QuerySettings = Field(default_factory=QuerySettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
     rate_limiting: RateLimitSettings = Field(default_factory=RateLimitSettings)
 

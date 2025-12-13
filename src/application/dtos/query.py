@@ -163,6 +163,16 @@ class QueryVideoRequest(BaseModel):
         default=False,
         description="Enable internal tool use during answer generation",
     )
+    force_visual: bool = Field(
+        default=False,
+        description="Force visual-first query mode (analyzes frames directly)",
+    )
+    max_visual_frames: int | None = Field(
+        default=None,
+        ge=1,
+        le=20,
+        description="Override max frames for visual query (uses config if None)",
+    )
 
 
 class QueryVideoResponse(BaseModel):

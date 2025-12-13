@@ -1,6 +1,7 @@
 """Video query service for semantic search and RAG."""
 
 import asyncio
+import base64
 import time
 from typing import Any
 
@@ -121,6 +122,22 @@ class VideoQueryService:
         # Use agentic decomposition if enabled
         if request.enable_decomposition:
             return await self.query_with_decomposition(video_id, request)
+
+        # Check for visual query - route to visual_query if forced or auto-detected
+        visual_settings = self._settings.query.visual
+        is_visual = request.force_visual or (
+            visual_settings.enabled and self._is_visual_query(request.query)
+        )
+        if is_visual:
+            self._logger.info(
+                "Visual query mode activated",
+                extra={
+                    "query": request.query[:50],
+                    "forced": request.force_visual,
+                    "auto_detected": not request.force_visual,
+                },
+            )
+            return await self.visual_query(video_id, request)
 
         start_time = time.perf_counter()
 
@@ -491,11 +508,12 @@ class VideoQueryService:
                     # Transcript chunk - find nearby frames for visual context
                     video_id = chunk_data.get("video_id")
                     if video_id:
+                        vs = self._settings.query.visual
                         nearby_frames = await self._get_frames_near_timestamp(
                             video_id=video_id,
                             timestamp=chunk_start_time,
-                            window_seconds=3.0,
-                            max_frames=1,  # 1 frame per transcript chunk
+                            window_seconds=vs.frame_window_seconds,
+                            max_frames=min(2, vs.max_frames_per_query),
                         )
                         for frame in nearby_frames:
                             blob_path = frame.get("blob_path")
@@ -1307,6 +1325,383 @@ class VideoQueryService:
         )
 
         return list(frames)
+
+    async def _get_distributed_frames(
+        self,
+        video_id: str,
+        duration_seconds: float,
+        max_frames: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Get frames distributed evenly across the video duration.
+
+        Useful for visual-first queries where we need representative
+        frames from the entire video, not just near a specific timestamp.
+
+        Args:
+            video_id: Video ID.
+            duration_seconds: Total video duration.
+            max_frames: Maximum frames to return.
+
+        Returns:
+            List of frame chunk documents distributed across the video.
+        """
+        if duration_seconds <= 0:
+            return []
+
+        # Calculate interval between frames
+        interval = duration_seconds / (max_frames + 1)
+        target_timestamps = [interval * (i + 1) for i in range(max_frames)]
+
+        frames: list[dict[str, Any]] = []
+
+        for timestamp in target_timestamps:
+            # Find closest frame to this timestamp
+            nearby = await self._document_db.find(
+                self._frames_collection,
+                {
+                    "video_id": video_id,
+                    "start_time": {"$lte": timestamp + 5.0},
+                },
+                sort=[("start_time", -1)],  # Get closest one before/at timestamp
+                limit=1,
+            )
+            nearby_list = list(nearby)
+            if nearby_list:
+                # Avoid duplicates
+                frame = nearby_list[0]
+                if not any(f.get("id") == frame.get("id") for f in frames):
+                    frames.append(frame)
+
+        self._logger.debug(
+            "Retrieved distributed frames",
+            extra={
+                "video_id": video_id,
+                "requested": max_frames,
+                "retrieved": len(frames),
+                "target_timestamps": target_timestamps,
+            },
+        )
+
+        return frames
+
+    def _is_visual_query(self, query: str) -> bool:
+        """Detect if a query is asking about visual content.
+
+        Args:
+            query: The user's query string.
+
+        Returns:
+            True if the query appears to be about visual content.
+        """
+        query_lower = query.lower()
+        visual_keywords = self._settings.query.visual.visual_keywords
+
+        for keyword in visual_keywords:
+            if keyword.lower() in query_lower:
+                self._logger.debug(
+                    "Visual query detected",
+                    extra={"query": query[:50], "matched_keyword": keyword},
+                )
+                return True
+
+        return False
+
+    async def _get_image_as_base64(self, blob_path: str) -> str | None:
+        """Download image from blob storage and convert to base64 data URL.
+
+        Args:
+            blob_path: Path to the image in blob storage.
+
+        Returns:
+            Base64 data URL string or None if failed.
+        """
+        if not self._blob:
+            return None
+
+        try:
+            # Download image bytes
+            image_bytes = await self._blob.download(
+                bucket=self._frames_bucket,
+                path=blob_path,
+            )
+
+            # Convert to base64
+            b64_data = base64.b64encode(image_bytes).decode("utf-8")
+
+            # Determine mime type from extension
+            ext = blob_path.lower().split(".")[-1] if "." in blob_path else "jpg"
+            mime_types = {
+                "jpg": "image/jpeg",
+                "jpeg": "image/jpeg",
+                "png": "image/png",
+                "webp": "image/webp",
+                "gif": "image/gif",
+            }
+            mime = mime_types.get(ext, "image/jpeg")
+
+            return f"data:{mime};base64,{b64_data}"
+
+        except Exception as e:
+            self._logger.debug(
+                "Failed to download and encode image",
+                extra={"blob_path": blob_path, "error": str(e)},
+            )
+            return None
+
+    async def _build_visual_context(
+        self,
+        video_id: str,
+        video_title: str,
+        duration_seconds: float,
+        builder: MultimodalMessageBuilder,
+        max_frames: int | None = None,
+    ) -> list[str]:
+        """Build visual context by adding distributed frames to the message.
+
+        Downloads images from blob storage and converts to base64 to avoid
+        issues with localhost URLs not being accessible by external LLM APIs.
+
+        Args:
+            video_id: Video ID.
+            video_title: Video title for context.
+            duration_seconds: Video duration.
+            builder: Message builder to add content to.
+            max_frames: Override max frames (uses settings if None).
+
+        Returns:
+            List of content types used.
+        """
+        content_types_used: list[str] = []
+        max_frames = max_frames or self._settings.query.visual.max_frames_per_query
+
+        if not self._blob:
+            self._logger.warning("Blob storage not available for visual context")
+            return content_types_used
+
+        # Get distributed frames
+        frames = await self._get_distributed_frames(
+            video_id=video_id,
+            duration_seconds=duration_seconds,
+            max_frames=max_frames,
+        )
+
+        if not frames:
+            self._logger.warning(
+                "No frames available for visual context",
+                extra={"video_id": video_id},
+            )
+            return content_types_used
+
+        # Add context header
+        builder.add_text(
+            f"Visual context from video '{video_title}' "
+            f"({len(frames)} frames across {duration_seconds:.0f} seconds):\n"
+        )
+
+        # Add each frame with timestamp
+        for i, frame in enumerate(frames):
+            blob_path = frame.get("blob_path")
+            start_time = frame.get("start_time", 0)
+            description = frame.get("description", "")
+
+            if blob_path:
+                try:
+                    # Download and convert to base64
+                    image_data = await self._get_image_as_base64(blob_path)
+                    if not image_data:
+                        continue
+
+                    timestamp_fmt = self._format_timestamp(start_time)
+
+                    # Add text label for frame
+                    frame_label = f"\n[Frame {i + 1} at {timestamp_fmt}]"
+                    if description:
+                        frame_label += f": {description}"
+                    builder.add_text(frame_label)
+
+                    # Add the image as base64
+                    builder.add_image(
+                        image_data,
+                        metadata={
+                            "frame_id": frame.get("id"),
+                            "timestamp": start_time,
+                            "frame_number": frame.get("frame_number"),
+                        },
+                    )
+
+                    if "image" not in content_types_used:
+                        content_types_used.append("image")
+
+                except Exception as e:
+                    self._logger.debug(
+                        "Failed to add frame to visual context",
+                        extra={"frame_id": frame.get("id"), "error": str(e)},
+                    )
+
+        self._logger.debug(
+            "Visual context built",
+            extra={
+                "video_id": video_id,
+                "frames_added": len(frames),
+            },
+        )
+
+        return content_types_used
+
+    async def visual_query(
+        self,
+        video_id: str,
+        request: QueryVideoRequest,
+    ) -> QueryVideoResponse:
+        """Query using visual-first approach with frames as primary context.
+
+        This method is optimized for questions about visual content that
+        may not be present in the transcript (e.g., text on screen,
+        names in console, UI elements).
+
+        Args:
+            video_id: ID of the video to query.
+            request: Query request.
+
+        Returns:
+            Response with answer based on visual analysis.
+        """
+        start_time = time.perf_counter()
+
+        self._logger.info(
+            "Starting visual-first query",
+            extra={
+                "video_id": video_id,
+                "query": request.query[:100],
+            },
+        )
+
+        with LogContext(video_id=video_id):
+            # Verify video exists and is ready
+            video = await self._document_db.find_by_id(
+                self._videos_collection, video_id
+            )
+
+            if not video:
+                raise ValueError(f"Video not found: {video_id}")
+
+            if video.get("status") != "ready":
+                raise ValueError(f"Video not ready: {video.get('status')}")
+
+            video_title = video.get("title", "Unknown")
+            duration_seconds = video.get("duration_seconds", 0)
+
+            # Determine model and capabilities
+            model_id = self._llm.default_model
+            enabled = {ContentType.TEXT, ContentType.IMAGE}
+
+            # Build multimodal message with visual context
+            builder = MultimodalMessageBuilder(
+                model_id=model_id,
+                enabled_modalities=enabled,
+                blob_storage=self._blob,
+            )
+
+            # Add distributed frames as primary context
+            # Use request override if specified, otherwise use settings
+            max_frames = (
+                request.max_visual_frames
+                or self._settings.query.visual.max_frames_per_query
+            )
+            content_types_used = await self._build_visual_context(
+                video_id=video_id,
+                video_title=video_title,
+                duration_seconds=duration_seconds,
+                builder=builder,
+                max_frames=max_frames,
+            )
+
+            # Also try to get relevant transcript context if available
+            try:
+                query_embeddings = await self._embedder.embed_texts([request.query])
+                if query_embeddings:
+                    search_results = await self._vector_db.search(
+                        collection=self._vectors_collection,
+                        query_vector=query_embeddings[0].vector,
+                        limit=3,  # Just a few for additional context
+                        filters={"video_id": video_id},
+                        score_threshold=request.similarity_threshold,
+                    )
+
+                    if search_results:
+                        builder.add_text("\n\nRelevant transcript excerpts:\n")
+                        for result in search_results:
+                            chunk_id = result.payload.get("chunk_id")
+                            if chunk_id:
+                                chunk = await self._document_db.find_by_id(
+                                    self._chunks_collection, chunk_id
+                                )
+                                if chunk:
+                                    text = chunk.get("text", "")[:300]
+                                    start = chunk.get("start_time", 0)
+                                    end = chunk.get("end_time", 0)
+                                    builder.add_text(
+                                        f"[{self._format_timestamp(start)} - "
+                                        f"{self._format_timestamp(end)}]: {text}\n"
+                                    )
+            except Exception as e:
+                self._logger.debug(
+                    "Could not add transcript context",
+                    extra={"error": str(e)},
+                )
+
+            # Add the question
+            builder.add_text(
+                f"\n\nQuestion: {request.query}\n\n"
+                "Please analyze the visual content (frames/images) carefully to "
+                "answer this question. Look for any text, names, numbers, or "
+                "visual elements shown on screen. If you can see the answer in "
+                "the images, provide it with the timestamp where it appears."
+            )
+
+            # Build message
+            user_message = builder.build_as_llm_message()
+
+            # System prompt for visual analysis
+            system_prompt = (
+                "You are an assistant that analyzes video content visually.\n"
+                f'You have been given frames from "{video_title}".\n'
+                "IMPORTANT: Carefully examine each image for:\n"
+                "- Text displayed on screen (console output, UI text, names, etc.)\n"
+                "- Numbers, codes, or identifiers visible\n"
+                "- Visual elements and their state\n"
+                "Answer based on what you can SEE in the frames.\n"
+                "Always cite the timestamp [MM:SS] where you found the information."
+            )
+
+            messages = [
+                Message(role=MessageRole.SYSTEM, content=system_prompt),
+                user_message,
+            ]
+
+            # Call LLM
+            response = await self._llm.generate(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1024,
+            )
+
+            elapsed_time = time.perf_counter() - start_time
+
+            # Build response
+            return QueryVideoResponse(
+                answer=response.content,
+                confidence=0.8,  # Visual analysis confidence
+                citations=[],  # Visual queries don't have traditional citations
+                query_metadata=QueryMetadata(
+                    video_id=video_id,
+                    video_title=video_title,
+                    modalities_searched=[QueryModality.FRAME],
+                    chunks_analyzed=0,  # Visual queries analyze frames directly
+                    processing_time_ms=int(elapsed_time * 1000),
+                    multimodal_content_used=content_types_used,
+                ),
+            )
 
     # =========================================================================
     # Confidence-Based Refinement

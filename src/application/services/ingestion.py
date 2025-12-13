@@ -28,6 +28,7 @@ from src.domain.models.chunk import (
 )
 from src.domain.models.video import VideoMetadata, VideoStatus
 from src.infrastructure.embeddings.base import EmbeddingServiceBase
+from src.infrastructure.llm.base import LLMServiceBase
 from src.infrastructure.transcription.base import (
     TranscriptionResult,
     TranscriptionServiceBase,
@@ -69,6 +70,7 @@ class VideoIngestionService:
         document_db: DocumentDBBase,
         settings: Settings,
         video_chunker: VideoChunkerBase | None = None,
+        llm_service: LLMServiceBase | None = None,
     ) -> None:
         """Initialize ingestion service with dependencies.
 
@@ -82,17 +84,32 @@ class VideoIngestionService:
             document_db: Document database for metadata.
             settings: Application settings.
             video_chunker: Optional video/audio chunker for segment extraction.
+            llm_service: Optional LLM service for frame descriptions (vision).
         """
         self._downloader = youtube_downloader
         self._transcriber = transcription_service
         self._text_embedder = text_embedding_service
         self._frame_extractor = frame_extractor
         self._video_chunker = video_chunker
+        self._llm = llm_service
         self._blob = blob_storage
         self._vector_db = vector_db
         self._document_db = document_db
         self._settings = settings
         self._logger = get_logger(__name__)
+
+        # Frame description service (optional, requires vision LLM)
+        # Import here to avoid circular imports
+        from src.application.services.frame_description import FrameDescriptionService
+
+        self._frame_describer: FrameDescriptionService | None = None
+        if llm_service and settings.query.visual.generate_frame_descriptions:
+            self._frame_describer = FrameDescriptionService(
+                llm_service=llm_service,
+                blob_storage=blob_storage,
+                settings=settings.query.visual,
+                frames_bucket=settings.blob_storage.buckets.frames,
+            )
 
         # Collection/bucket names from settings
         self._videos_collection = settings.document_db.collections.videos
@@ -1059,7 +1076,81 @@ class VideoIngestionService:
             f"Extracted {len(frames)} frames",
         )
 
+        # Generate AI descriptions for frames if enabled
+        if self._frame_describer and self._frame_describer.supports_vision:
+            frames = await self._generate_frame_descriptions(frames, report_progress)
+
         return frames
+
+    async def _generate_frame_descriptions(
+        self,
+        frames: list[FrameChunk],
+        report_progress: Callable[[ProcessingStep, float, float, str], None],
+    ) -> list[FrameChunk]:
+        """Generate AI descriptions for frames using vision LLM.
+
+        Args:
+            frames: List of frame chunks to describe.
+            report_progress: Progress callback.
+
+        Returns:
+            List of frames with descriptions added.
+        """
+        if not self._frame_describer:
+            return frames
+
+        self._logger.info(
+            "Starting frame description generation",
+            extra={"frame_count": len(frames)},
+        )
+
+        report_progress(
+            ProcessingStep.EXTRACTING_FRAMES,
+            0.5,
+            0.7,
+            "Generating frame descriptions...",
+        )
+
+        def progress_cb(completed: int, total: int) -> None:
+            progress = 0.5 + (completed / total) * 0.4
+            report_progress(
+                ProcessingStep.EXTRACTING_FRAMES,
+                progress,
+                0.7,
+                f"Described {completed}/{total} frames",
+            )
+
+        try:
+            described_frames = await self._frame_describer.describe_frames_batch(
+                frames=frames,
+                concurrency=3,  # Limit concurrent vision API calls
+                progress_callback=progress_cb,
+            )
+
+            success_count = sum(1 for f in described_frames if f.description)
+            self._logger.info(
+                "Frame description generation complete",
+                extra={
+                    "total_frames": len(frames),
+                    "described": success_count,
+                },
+            )
+
+            report_progress(
+                ProcessingStep.EXTRACTING_FRAMES,
+                0.95,
+                0.7,
+                f"Described {success_count}/{len(frames)} frames",
+            )
+
+            return described_frames
+
+        except Exception as e:
+            self._logger.error(
+                "Frame description generation failed, continuing without descriptions",
+                extra={"error": str(e)},
+            )
+            return frames
 
     async def _extract_frames(
         self,
@@ -1134,6 +1225,17 @@ class VideoIngestionService:
                     height=extracted_frame.height,
                 )
                 frames.append(frame_chunk)
+
+        # Generate AI descriptions for frames if enabled
+        if self._frame_describer and self._frame_describer.supports_vision:
+            self._logger.info(
+                "Generating frame descriptions",
+                extra={"frame_count": len(frames)},
+            )
+            frames = await self._frame_describer.describe_frames_batch(
+                frames=frames,
+                concurrency=3,
+            )
 
         return frames
 
