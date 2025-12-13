@@ -14,6 +14,7 @@ class ProcessingStep(str, Enum):
     TRANSCRIBING = "transcribing"
     EXTRACTING_FRAMES = "extracting_frames"
     EXTRACTING_AUDIO = "extracting_audio"
+    EXTRACTING_VIDEO = "extracting_video"
     CHUNKING = "chunking"
     EMBEDDING = "embedding"
     STORING = "storing"
