@@ -133,6 +133,7 @@ class VideoIngestionService:
             extra={
                 "url": request.url,
                 "extract_frames": request.extract_frames,
+                "extract_audio_chunks": request.extract_audio_chunks,
                 "max_resolution": request.max_resolution,
                 "language_hint": request.language_hint,
             },
@@ -1192,6 +1193,19 @@ class VideoIngestionService:
                 "Audio chunk extraction complete",
                 extra={"extracted_count": len(extracted_segments)},
             )
+
+            if not extracted_segments:
+                self._logger.warning(
+                    "No audio chunks were extracted from the audio file. "
+                    "This could indicate ffprobe failed to get duration or "
+                    "the audio file is corrupted/empty.",
+                    extra={
+                        "video_id": video_metadata.id,
+                        "audio_local_path": str(audio_local_path),
+                        "chunk_seconds": chunk_seconds,
+                    },
+                )
+                return []
 
             report_progress(
                 ProcessingStep.EXTRACTING_AUDIO,

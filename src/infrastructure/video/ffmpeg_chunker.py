@@ -5,6 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 
+from src.commons.telemetry import get_logger
 from src.infrastructure.video.base import (
     AudioSegment,
     VideoChunkerBase,
@@ -32,6 +33,7 @@ class FFmpegVideoChunker(VideoChunkerBase):
         """
         self._ffmpeg = ffmpeg_path
         self._ffprobe = ffprobe_path
+        self._logger = get_logger(__name__)
 
     async def chunk_video(
         self,
@@ -386,14 +388,41 @@ class FFmpegVideoChunker(VideoChunkerBase):
         bitrate: str = "192k",
     ) -> list[AudioSegment]:
         """Split audio into chunks."""
+        self._logger.debug(
+            "Starting audio chunking",
+            extra={
+                "audio_path": str(audio_path),
+                "output_dir": str(output_dir),
+                "chunk_seconds": chunk_seconds,
+                "format": format,
+            },
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Get audio duration using ffprobe
         duration = await self._get_audio_duration(audio_path)
 
+        self._logger.debug(
+            "Audio duration retrieved",
+            extra={"duration": duration, "audio_path": str(audio_path)},
+        )
+
+        if duration <= 0:
+            self._logger.warning(
+                "Audio duration is zero or negative, no chunks will be created",
+                extra={"duration": duration, "audio_path": str(audio_path)},
+            )
+            return []
+
         segments: list[AudioSegment] = []
         current_time = 0.0
         chunk_idx = 0
+        expected_chunks = int(duration // chunk_seconds) + 1
+
+        self._logger.debug(
+            "Will create audio chunks",
+            extra={"expected_chunks": expected_chunks, "duration": duration},
+        )
 
         while current_time < duration:
             chunk_idx += 1
@@ -413,6 +442,11 @@ class FFmpegVideoChunker(VideoChunkerBase):
             segments.append(segment)
 
             current_time = end_time
+
+        self._logger.debug(
+            "Audio chunking complete",
+            extra={"total_chunks": len(segments)},
+        )
 
         return segments
 
@@ -486,11 +520,50 @@ class FFmpegVideoChunker(VideoChunkerBase):
             str(audio_path),
         ]
 
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: subprocess.run(cmd, capture_output=True, check=True),
+        self._logger.debug(
+            "Getting audio duration with ffprobe",
+            extra={"audio_path": str(audio_path), "command": " ".join(cmd)},
         )
 
-        data = json.loads(result.stdout)
-        return float(data.get("format", {}).get("duration", 0))
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(cmd, capture_output=True, check=True),
+            )
+        except subprocess.CalledProcessError as e:
+            self._logger.error(
+                "ffprobe failed to get audio duration",
+                extra={
+                    "audio_path": str(audio_path),
+                    "stderr": e.stderr.decode() if e.stderr else None,
+                    "returncode": e.returncode,
+                },
+            )
+            return 0.0
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            self._logger.error(
+                "Failed to parse ffprobe JSON output",
+                extra={
+                    "audio_path": str(audio_path),
+                    "stdout": result.stdout.decode() if result.stdout else None,
+                    "error": str(e),
+                },
+            )
+            return 0.0
+
+        duration = float(data.get("format", {}).get("duration", 0))
+
+        if duration <= 0:
+            self._logger.warning(
+                "ffprobe returned zero or invalid duration",
+                extra={
+                    "audio_path": str(audio_path),
+                    "ffprobe_data": data,
+                },
+            )
+
+        return duration
