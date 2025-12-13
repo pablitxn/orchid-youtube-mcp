@@ -122,7 +122,7 @@ jobs:
             -p 9000:9000 \
             -e MINIO_ROOT_USER="$ci_minio_access_key" \
             -e MINIO_ROOT_PASSWORD="$ci_minio_secret_key" \
-            minio/minio:latest server /data
+            bitnami/minio:latest server /data
           docker run -d --name mongodb \
             -p 27017:27017 \
             -e MONGO_INITDB_ROOT_USERNAME="$ci_mongo_username" \
