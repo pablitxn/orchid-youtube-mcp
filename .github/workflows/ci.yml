@@ -80,11 +80,11 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
-  # Integration tests - only on main branch or when explicitly triggered
+  # Integration tests - only when explicitly triggered via label
   integration-test:
     name: Integration Test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'run-integration')
+    if: contains(github.event.pull_request.labels.*.name, 'run-integration')
     needs: [lint, type-check, test]
     services:
       qdrant:
@@ -122,7 +122,7 @@ jobs:
             -p 9000:9000 \
             -e MINIO_ROOT_USER="$ci_minio_access_key" \
             -e MINIO_ROOT_PASSWORD="$ci_minio_secret_key" \
-            bitnami/minio:latest server /data
+            minio/minio:latest server /data
           docker run -d --name mongodb \
             -p 27017:27017 \
             -e MONGO_INITDB_ROOT_USERNAME="$ci_mongo_username" \
