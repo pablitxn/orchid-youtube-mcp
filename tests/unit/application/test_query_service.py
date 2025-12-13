@@ -11,13 +11,12 @@ from src.application.dtos.query import (
     QueryVideoRequest,
 )
 from src.application.services.query import VideoQueryService
-from src.commons.settings.models import Settings
 
 
 @pytest.fixture
 def mock_settings():
     """Create mock settings."""
-    settings = MagicMock(spec=Settings)
+    settings = MagicMock()
     settings.vector_db.collections.transcripts = "transcripts"
     settings.document_db.collections.videos = "videos"
     settings.document_db.collections.transcript_chunks = "transcript_chunks"
@@ -134,6 +133,8 @@ class TestVideoQueryService:
 
     async def test_query_video_not_found(self, query_service, mock_document_db):
         """Test query when video not found."""
+        # Clear the side_effect and set return_value to None
+        mock_document_db.find_by_id.side_effect = None
         mock_document_db.find_by_id.return_value = None
 
         request = QueryVideoRequest(query="Test query")
@@ -231,6 +232,8 @@ class TestGetSources:
 
     async def test_get_sources_video_not_found(self, query_service, mock_document_db):
         """Test get_sources when video not found."""
+        # Clear the side_effect and set return_value to None
+        mock_document_db.find_by_id.side_effect = None
         mock_document_db.find_by_id.return_value = None
 
         request = GetSourcesRequest(citation_ids=["chunk-1"])

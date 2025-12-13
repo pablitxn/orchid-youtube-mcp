@@ -148,6 +148,18 @@ def _handle_exception(  # noqa: PLR0911
         )
 
     if isinstance(exc, IngestionError):
+        from src.application.dtos.ingestion import ProcessingStep
+
+        # Validation errors should return 400, other ingestion errors return 500
+        if exc.step == ProcessingStep.VALIDATING:
+            logger.warning(f"Validation error: {exc}")
+            return _build_error_response(
+                request=request,
+                code="VALIDATION_ERROR",
+                message=str(exc),
+                status_code=status.HTTP_400_BAD_REQUEST,
+                details={"step": exc.step.value},
+            )
         logger.error(f"Ingestion error at step {exc.step}: {exc}")
         return _build_error_response(
             request=request,

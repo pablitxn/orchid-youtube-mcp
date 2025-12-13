@@ -27,9 +27,17 @@ def mock_settings():
     settings = MagicMock()
     settings.app.name = "test-app"
     settings.app.version = "0.1.0"
+    settings.app.environment = "test"
     settings.server.cors_origins = ["*"]
     settings.server.api_prefix = "/v1"
     settings.server.docs_enabled = True
+    # Add collections settings for health checks
+    settings.document_db.collections.videos = "videos"
+    settings.document_db.provider = "mongodb"
+    settings.vector_db.collections.transcripts = "transcripts"
+    settings.vector_db.provider = "qdrant"
+    settings.blob_storage.buckets.videos = "videos"
+    settings.blob_storage.provider = "minio"
     return settings
 
 
@@ -65,22 +73,24 @@ def mock_query_service():
 @pytest.fixture
 def client(mock_settings, mock_factory, mock_ingestion_service, mock_query_service):
     """Create test client with mocked dependencies."""
+    from src.api.dependencies import (
+        get_infrastructure_factory,
+        get_ingestion_service,
+        get_query_service,
+        get_settings,
+    )
+
     with (
-        patch("src.api.dependencies.get_settings", return_value=mock_settings),
-        patch("src.api.dependencies.get_factory", return_value=mock_factory),
-        patch(
-            "src.api.dependencies.get_ingestion_service",
-            return_value=mock_ingestion_service,
-        ),
-        patch(
-            "src.api.dependencies.get_query_service",
-            return_value=mock_query_service,
-        ),
         patch("src.api.main.get_settings", return_value=mock_settings),
         patch("src.api.dependencies.init_services", new_callable=AsyncMock),
         patch("src.api.dependencies.shutdown_services", new_callable=AsyncMock),
     ):
         app = create_app()
+        # Override dependencies using FastAPI's proper mechanism
+        app.dependency_overrides[get_settings] = lambda: mock_settings
+        app.dependency_overrides[get_infrastructure_factory] = lambda: mock_factory
+        app.dependency_overrides[get_ingestion_service] = lambda: mock_ingestion_service
+        app.dependency_overrides[get_query_service] = lambda: mock_query_service
         yield TestClient(app, raise_server_exceptions=False)
 
 
@@ -126,10 +136,10 @@ class TestIngestionRoutes:
 
         response = client.post(
             "/v1/videos/ingest",
-            json={"url": "https://youtube.com/watch?v=test123"},
+            json={"youtube_url": "https://youtube.com/watch?v=test123"},
         )
 
-        assert response.status_code == status.HTTP_200_OK
+        assert response.status_code == status.HTTP_202_ACCEPTED
         data = response.json()
         assert data["video_id"] == "uuid-1234"
         assert data["youtube_id"] == "test123"
@@ -145,7 +155,7 @@ class TestIngestionRoutes:
 
         response = client.post(
             "/v1/videos/ingest",
-            json={"url": "invalid-url"},
+            json={"youtube_url": "invalid-url"},
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -240,7 +250,7 @@ class TestQueryRoutes:
             json={"query": "What is this about?"},
         )
 
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_409_CONFLICT
 
 
 class TestSourcesRoutes:
@@ -350,22 +360,38 @@ class TestVideoManagementRoutes:
 
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert data["video_id"] == "uuid-1"
+        assert data["id"] == "uuid-1"  # Route returns 'id' not 'video_id'
 
     def test_delete_video_success(self, client, mock_ingestion_service):
         """Test successful video deletion."""
+        # Mock get_ingestion_status to return a video (needed for existence check)
+        mock_ingestion_service.get_ingestion_status.return_value = IngestVideoResponse(
+            video_id="uuid-1",
+            youtube_id="test1",
+            title="Video 1",
+            duration_seconds=100,
+            status=IngestionStatus.COMPLETED,
+            chunk_counts={},
+            created_at=datetime.now(UTC),
+        )
         mock_ingestion_service.delete_video.return_value = True
 
-        response = client.delete("/v1/videos/uuid-1")
+        response = client.delete(
+            "/v1/videos/uuid-1",
+            headers={"X-Confirm-Delete": "true"},
+        )
 
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert data["deleted"] is True
+        assert data["success"] is True
 
     def test_delete_video_not_found(self, client, mock_ingestion_service):
         """Test deleting non-existent video."""
-        mock_ingestion_service.delete_video.return_value = False
+        mock_ingestion_service.get_ingestion_status.return_value = None
 
-        response = client.delete("/v1/videos/nonexistent")
+        response = client.delete(
+            "/v1/videos/nonexistent",
+            headers={"X-Confirm-Delete": "true"},
+        )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND

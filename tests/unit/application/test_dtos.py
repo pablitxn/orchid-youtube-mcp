@@ -38,10 +38,10 @@ class TestIngestVideoRequest:
         """Test default values are set correctly."""
         request = IngestVideoRequest(url="https://youtube.com/watch?v=test")
         assert request.extract_frames is True
-        assert request.extract_audio_chunks is False
+        assert request.extract_audio_chunks is True
         assert request.extract_video_chunks is False
         assert request.language_hint is None
-        assert request.max_resolution is None
+        assert request.max_resolution == 720
 
     def test_custom_options(self):
         """Test custom options."""
@@ -49,11 +49,11 @@ class TestIngestVideoRequest:
             url="https://youtube.com/watch?v=test",
             language_hint="es",
             extract_frames=False,
-            max_resolution="720p",
+            max_resolution=1080,
         )
         assert request.language_hint == "es"
         assert request.extract_frames is False
-        assert request.max_resolution == "720p"
+        assert request.max_resolution == 1080
 
 
 class TestIngestVideoResponse:

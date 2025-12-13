@@ -30,6 +30,8 @@ def mock_settings():
     settings.document_db.collections.videos = "videos"
     settings.document_db.collections.transcript_chunks = "transcript_chunks"
     settings.document_db.collections.frame_chunks = "frame_chunks"
+    settings.document_db.collections.audio_chunks = "audio_chunks"
+    settings.document_db.collections.video_chunks = "video_chunks"
 
     # Vector DB settings
     settings.vector_db.collections.transcripts = "transcripts"
@@ -37,6 +39,7 @@ def mock_settings():
     # Blob storage settings
     settings.blob_storage.buckets.videos = "videos"
     settings.blob_storage.buckets.frames = "frames"
+    settings.blob_storage.buckets.chunks = "chunks"
 
     # Chunking settings
     settings.chunking.transcript.chunk_seconds = 30
@@ -620,7 +623,9 @@ class TestCleanupLogic:
         mock_blob_storage.list_blobs.side_effect = [
             [video_blob],  # Videos bucket
             [frame_blob],  # Frames bucket
+            [],  # Chunks bucket (empty)
         ]
+        mock_blob_storage.bucket_exists.return_value = True
 
         await ingestion_service._cleanup_video_data(video)
 
@@ -638,6 +643,9 @@ class TestCleanupLogic:
         )
         mock_document_db.delete_many.assert_any_call(
             "frame_chunks", {"video_id": "cleanup-test-uuid"}
+        )
+        mock_document_db.delete_many.assert_any_call(
+            "audio_chunks", {"video_id": "cleanup-test-uuid"}
         )
 
         # Verify embeddings were deleted
@@ -986,7 +994,8 @@ class TestVideoCRUD:
         result = await ingestion_service.delete_video("video-1")
 
         assert result is True
-        mock_vector_db.delete_by_filter.assert_called_once()
+        # delete_by_filter is called for each vector collection
+        mock_vector_db.delete_by_filter.assert_called()
         mock_document_db.delete_many.assert_called()
         mock_document_db.delete.assert_called_once_with("videos", "video-1")
 
