@@ -1,5 +1,6 @@
 """FastAPI application factory and lifespan management."""
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -11,6 +12,37 @@ from src.api.dependencies import get_settings, init_services, shutdown_services
 from src.api.middleware.error_handler import error_handler_middleware
 from src.api.middleware.logging import LoggingMiddleware
 from src.api.openapi.routes import health, ingestion, query, sources, videos
+from src.commons.telemetry import configure_logging
+
+
+def _setup_logging() -> None:
+    """Configure logging early, before uvicorn handlers take over.
+
+    This must be called at module level to ensure our formatters
+    are applied before uvicorn starts.
+    """
+    settings = get_settings()
+    log_level = settings.telemetry.log_level or settings.app.log_level
+    log_format = settings.telemetry.log_format
+
+    # Configure root logger for our application
+    configure_logging(
+        level=log_level,
+        format_type=log_format,
+        logger_name="src",
+    )
+
+    # Also configure uvicorn loggers to use our format
+    # so all output is consistent
+    uvicorn_loggers = ["uvicorn", "uvicorn.error", "uvicorn.access"]
+    for logger_name in uvicorn_loggers:
+        logger = logging.getLogger(logger_name)
+        # Only set level, let them keep their handlers but inherit our level
+        logger.setLevel(getattr(logging, log_level.upper()))
+
+
+# Configure logging at module import time (before uvicorn lifespan)
+_setup_logging()
 
 
 @asynccontextmanager

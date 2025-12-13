@@ -134,9 +134,10 @@ class OpenAIWhisperTranscription(TranscriptionServiceBase):
         word_idx = 0
 
         for seg in response_segments:
-            seg_start = float(seg.get("start", 0))
-            seg_end = float(seg.get("end", 0))
-            seg_text = seg.get("text", "")
+            # OpenAI returns Pydantic objects with attributes, not dicts
+            seg_start = float(getattr(seg, "start", 0))
+            seg_end = float(getattr(seg, "end", 0))
+            seg_text = getattr(seg, "text", "")
 
             # Collect words for this segment
             segment_words: list[TranscriptionWord] = []
@@ -144,14 +145,14 @@ class OpenAIWhisperTranscription(TranscriptionServiceBase):
             if word_timestamps and response_words:
                 while word_idx < len(response_words):
                     word_data = response_words[word_idx]
-                    word_start = float(word_data.get("start", 0))
-                    word_end = float(word_data.get("end", 0))
+                    word_start = float(getattr(word_data, "start", 0))
+                    word_end = float(getattr(word_data, "end", 0))
 
                     # Check if word belongs to this segment
                     if word_start >= seg_start and word_end <= seg_end + 0.1:
                         segment_words.append(
                             TranscriptionWord(
-                                word=word_data.get("word", "").strip(),
+                                word=getattr(word_data, "word", "").strip(),
                                 start_time=word_start,
                                 end_time=word_end,
                                 confidence=1.0,  # Whisper: no word conf
