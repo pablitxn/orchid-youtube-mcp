@@ -6,17 +6,29 @@ from typing import Any
 
 from src.application.dtos.query import (
     CitationDTO,
+    CrossVideoRequest,
+    CrossVideoResponse,
     DecompositionInfo,
     GetSourcesRequest,
     QueryMetadata,
     QueryModality,
     QueryVideoRequest,
     QueryVideoResponse,
+    RefinementInfo,
     SourceArtifact,
     SourceDetail,
     SourcesResponse,
     SubTaskInfo,
     TimestampRangeDTO,
+    ToolCall,
+    VideoResult,
+)
+from src.application.services.agentic_query import (
+    CrossVideoSearcher,
+    QueryRefiner,
+    RefinementStrategy,
+    ToolExecutor,
+    get_tools_prompt,
 )
 from src.application.services.multimodal_message import MultimodalMessageBuilder
 from src.application.services.query_decomposer import (
@@ -79,6 +91,15 @@ class VideoQueryService:
         # Agentic components
         self._decomposer = QueryDecomposer(llm_service)
         self._synthesizer = ResultSynthesizer(llm_service)
+        self._refiner = QueryRefiner(llm_service)
+        self._cross_video = CrossVideoSearcher(llm_service)
+        self._tool_executor = ToolExecutor(
+            document_db=document_db,
+            blob_storage=blob_storage,
+            llm_service=llm_service,
+            embedder=text_embedding_service,
+            vector_db=vector_db,
+        )
 
     async def query(  # noqa: PLR0915
         self,
@@ -1285,3 +1306,465 @@ class VideoQueryService:
         )
 
         return list(frames)
+
+    # =========================================================================
+    # Confidence-Based Refinement
+    # =========================================================================
+
+    async def query_with_refinement(
+        self,
+        video_id: str,
+        request: QueryVideoRequest,
+    ) -> tuple[QueryVideoResponse, RefinementInfo]:
+        """Query with automatic refinement if confidence is low.
+
+        Args:
+            video_id: Video to query.
+            request: Query request.
+
+        Returns:
+            Tuple of (response, refinement_info).
+        """
+        # First attempt
+        response = await self.query(video_id, request)
+        original_confidence = response.confidence
+
+        refinement_info = RefinementInfo(
+            was_refined=False,
+            original_confidence=original_confidence,
+            final_confidence=original_confidence,
+            iterations=1,
+        )
+
+        # Check if refinement needed
+        if not self._refiner.should_refine(
+            original_confidence,
+            request.confidence_threshold,
+            iteration=0,
+        ):
+            return response, refinement_info
+
+        self._logger.info(
+            "Low confidence, attempting refinement",
+            extra={
+                "original_confidence": original_confidence,
+                "threshold": request.confidence_threshold,
+            },
+        )
+
+        strategies_tried: list[RefinementStrategy] = []
+        best_response = response
+        best_confidence = original_confidence
+
+        for iteration in range(self._refiner._max_iterations):
+            strategy = self._refiner.select_strategy(iteration, strategies_tried)
+            strategies_tried.append(strategy)
+
+            if strategy == RefinementStrategy.EXPAND_QUERY:
+                # Try expanded query
+                expanded, _ = await self._refiner.expand_query(request.query)
+                new_request = request.model_copy(update={"query": expanded})
+                new_response = await self.query(video_id, new_request)
+
+                if new_response.confidence > best_confidence:
+                    best_response = new_response
+                    best_confidence = new_response.confidence
+
+            elif strategy == RefinementStrategy.LOWER_THRESHOLD:
+                # Lower threshold and retry
+                new_threshold = request.similarity_threshold * 0.7
+                new_request = request.model_copy(
+                    update={"similarity_threshold": new_threshold}
+                )
+                new_response = await self.query(video_id, new_request)
+
+                if new_response.confidence > best_confidence:
+                    best_response = new_response
+                    best_confidence = new_response.confidence
+
+            # Check if we've reached acceptable confidence
+            if best_confidence >= request.confidence_threshold:
+                break
+
+        refinement_info = RefinementInfo(
+            was_refined=True,
+            original_confidence=original_confidence,
+            final_confidence=best_confidence,
+            refinement_strategy=(
+                strategies_tried[-1].value if strategies_tried else None
+            ),
+            iterations=len(strategies_tried) + 1,
+        )
+
+        self._logger.info(
+            "Refinement complete",
+            extra={
+                "original_confidence": original_confidence,
+                "final_confidence": best_confidence,
+                "strategies_tried": [s.value for s in strategies_tried],
+            },
+        )
+
+        return best_response, refinement_info
+
+    # =========================================================================
+    # Cross-Video Search
+    # =========================================================================
+
+    async def query_across_videos(
+        self,
+        request: CrossVideoRequest,
+    ) -> CrossVideoResponse:
+        """Search across multiple videos and synthesize results.
+
+        Args:
+            request: Cross-video query request.
+
+        Returns:
+            Synthesized response from all videos.
+        """
+        start_time = time.perf_counter()
+
+        self._logger.info(
+            "Starting cross-video query",
+            extra={
+                "query": request.query[:100],
+                "video_ids": request.video_ids,
+                "max_videos": request.max_videos,
+            },
+        )
+
+        # Get videos to search
+        if request.video_ids:
+            video_ids = request.video_ids[: request.max_videos]
+        else:
+            # Get all ready videos
+            videos = await self._document_db.find(
+                self._videos_collection,
+                {"status": "ready"},
+                limit=request.max_videos,
+            )
+            video_ids = [str(v.get("id")) for v in videos if v.get("id")]
+
+        if not video_ids:
+            return CrossVideoResponse(
+                answer="No videos available to search.",
+                confidence=0.0,
+                video_results=[],
+                videos_searched=0,
+                total_citations=0,
+                processing_time_ms=0,
+            )
+
+        # Search each video in parallel
+        search_tasks = [
+            self._search_single_video(
+                video_id=vid,
+                query=request.query,
+                max_citations=request.max_citations_per_video,
+                similarity_threshold=request.similarity_threshold,
+            )
+            for vid in video_ids
+        ]
+
+        video_results = await asyncio.gather(*search_tasks)
+
+        # Filter out empty results and sort by relevance
+        video_results = [r for r in video_results if r.citations]
+        video_results.sort(key=lambda x: x.relevance_score, reverse=True)
+
+        # Synthesize
+        answer, confidence = await self._cross_video.synthesize_results(
+            query=request.query,
+            video_results=video_results,
+        )
+
+        processing_time_ms = int((time.perf_counter() - start_time) * 1000)
+        total_citations = sum(len(r.citations) for r in video_results)
+
+        self._logger.info(
+            "Cross-video query complete",
+            extra={
+                "videos_searched": len(video_ids),
+                "videos_with_results": len(video_results),
+                "total_citations": total_citations,
+                "processing_time_ms": processing_time_ms,
+            },
+        )
+
+        return CrossVideoResponse(
+            answer=answer,
+            confidence=confidence,
+            video_results=video_results,
+            videos_searched=len(video_ids),
+            total_citations=total_citations,
+            processing_time_ms=processing_time_ms,
+        )
+
+    async def _search_single_video(
+        self,
+        video_id: str,
+        query: str,
+        max_citations: int,
+        similarity_threshold: float,
+    ) -> VideoResult:
+        """Search a single video for cross-video query.
+
+        Args:
+            video_id: Video to search.
+            query: Search query.
+            max_citations: Maximum citations.
+            similarity_threshold: Minimum similarity.
+
+        Returns:
+            VideoResult with citations.
+        """
+        try:
+            # Get video metadata
+            video = await self._document_db.find_by_id(
+                self._videos_collection, video_id
+            )
+            if not video or video.get("status") != "ready":
+                return VideoResult(
+                    video_id=video_id,
+                    video_title="Unknown",
+                    relevance_score=0.0,
+                    citations=[],
+                )
+
+            # Generate embedding
+            embeddings = await self._embedder.embed_texts([query])
+            if not embeddings:
+                return VideoResult(
+                    video_id=video_id,
+                    video_title=video.get("title", "Unknown"),
+                    relevance_score=0.0,
+                    citations=[],
+                )
+
+            # Search
+            results = await self._vector_db.search(
+                collection=self._vectors_collection,
+                query_vector=embeddings[0].vector,
+                limit=max_citations,
+                score_threshold=similarity_threshold,
+                filters={"video_id": video_id},
+            )
+
+            if not results:
+                return VideoResult(
+                    video_id=video_id,
+                    video_title=video.get("title", "Unknown"),
+                    relevance_score=0.0,
+                    citations=[],
+                )
+
+            # Build citations
+            citations: list[CitationDTO] = []
+            scores: list[float] = []
+
+            for r in results:
+                chunk_id = r.payload.get("chunk_id")
+                if chunk_id:
+                    chunk = await self._document_db.find_by_id(
+                        self._chunks_collection, chunk_id
+                    )
+                    if chunk:
+                        citations.append(
+                            CitationDTO(
+                                id=chunk.get("id", ""),
+                                modality=QueryModality.TRANSCRIPT,
+                                timestamp_range=TimestampRangeDTO(
+                                    start_time=chunk.get("start_time", 0),
+                                    end_time=chunk.get("end_time", 0),
+                                    display=self._format_timestamp(
+                                        chunk.get("start_time", 0)
+                                    ),
+                                ),
+                                content_preview=chunk.get("text", "")[:300],
+                                relevance_score=r.score,
+                            )
+                        )
+                        scores.append(r.score)
+
+            avg_score = sum(scores) / len(scores) if scores else 0.0
+
+            return VideoResult(
+                video_id=video_id,
+                video_title=video.get("title", "Unknown"),
+                relevance_score=avg_score,
+                citations=citations,
+            )
+
+        except Exception as e:
+            self._logger.warning(
+                f"Failed to search video {video_id}: {e}",
+            )
+            return VideoResult(
+                video_id=video_id,
+                video_title="Error",
+                relevance_score=0.0,
+                citations=[],
+            )
+
+    # =========================================================================
+    # Tool-Augmented Generation
+    # =========================================================================
+
+    async def query_with_tools(
+        self,
+        video_id: str,
+        request: QueryVideoRequest,
+    ) -> tuple[QueryVideoResponse, list[ToolCall]]:
+        """Query with internal tool use during generation.
+
+        The LLM can call tools to get more context during answer generation.
+
+        Args:
+            video_id: Video to query.
+            request: Query request.
+
+        Returns:
+            Tuple of (response, tool_calls_made).
+        """
+        tool_calls: list[ToolCall] = []
+
+        # Get initial context
+        video = await self._document_db.find_by_id(self._videos_collection, video_id)
+        if not video:
+            raise ValueError(f"Video not found: {video_id}")
+
+        # Generate initial embedding and search
+        embeddings = await self._embedder.embed_texts([request.query])
+        if not embeddings:
+            raise ValueError("Failed to generate embedding")
+
+        results = await self._vector_db.search(
+            collection=self._vectors_collection,
+            query_vector=embeddings[0].vector,
+            limit=request.max_citations * 2,
+            score_threshold=request.similarity_threshold,
+            filters={"video_id": video_id},
+        )
+
+        # Fetch chunks
+        context_chunks: list[dict[str, Any]] = []
+        for r in results:
+            chunk_id = r.payload.get("chunk_id")
+            if chunk_id:
+                chunk = await self._document_db.find_by_id(
+                    self._chunks_collection, chunk_id
+                )
+                if chunk:
+                    context_chunks.append({"chunk": chunk, "score": r.score})
+
+        # Build initial context text
+        context_text = self._build_context_text(context_chunks)
+
+        # Build prompt with tools
+        tools_prompt = get_tools_prompt()
+        system_prompt = (
+            f"You are answering questions about the video '{video.get('title')}'.\n"
+            "Use the provided context. If you need more information, use the tools.\n\n"
+            f"{tools_prompt}"
+        )
+
+        user_prompt = f"Context:\n{context_text}\n\nQuestion: {request.query}"
+
+        messages = [
+            Message(role=MessageRole.SYSTEM, content=system_prompt),
+            Message(role=MessageRole.USER, content=user_prompt),
+        ]
+
+        # Tool context for executor
+        tool_context = {
+            "chunks_collection": self._chunks_collection,
+            "frames_collection": self._frames_collection,
+            "vectors_collection": self._vectors_collection,
+        }
+
+        # Agentic loop - allow up to 3 tool calls
+        max_tool_calls = 3
+        for _ in range(max_tool_calls + 1):
+            response = await self._llm.generate(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1500,
+            )
+
+            # Check for tool call
+            tool, args = self._tool_executor.parse_tool_call(response.content)
+
+            if tool is None:
+                # No tool call, we have our answer
+                break
+
+            # Execute tool
+            result, tool_call = await self._tool_executor.execute(
+                tool=tool,
+                args=args,
+                video_id=video_id,
+                context=tool_context,
+            )
+            tool_calls.append(tool_call)
+
+            # Add tool result to conversation
+            messages.append(
+                Message(role=MessageRole.ASSISTANT, content=response.content)
+            )
+            messages.append(
+                Message(role=MessageRole.USER, content=f"Tool result:\n{result}")
+            )
+
+        # Build final response
+        answer = response.content
+        if "TOOL_CALL:" in answer:
+            # Remove incomplete tool call from answer
+            answer = answer.split("TOOL_CALL:")[0].strip()
+
+        if context_chunks:
+            confidence = sum(c["score"] for c in context_chunks) / len(context_chunks)
+        else:
+            confidence = 0.0
+
+        citations = self._build_citations(
+            context_chunks[: request.max_citations],
+            video,
+        )
+
+        query_response = QueryVideoResponse(
+            answer=answer,
+            reasoning=f"Used {len(tool_calls)} tool(s) during generation",
+            confidence=min(confidence, 0.95),
+            citations=citations,
+            query_metadata=QueryMetadata(
+                video_id=video_id,
+                video_title=video.get("title", "Unknown"),
+                modalities_searched=[QueryModality.TRANSCRIPT],
+                chunks_analyzed=len(context_chunks),
+                processing_time_ms=0,  # Not tracked in this method
+            ),
+        )
+
+        self._logger.info(
+            "Tool-augmented query complete",
+            extra={
+                "tool_calls": len(tool_calls),
+                "tools_used": [tc.tool_name for tc in tool_calls],
+            },
+        )
+
+        return query_response, tool_calls
+
+    def _build_context_text(self, context_chunks: list[dict[str, Any]]) -> str:
+        """Build context text from chunks."""
+        parts = []
+        for i, item in enumerate(context_chunks, 1):
+            chunk = item["chunk"]
+            start = chunk.get("start_time", 0)
+            end = chunk.get("end_time", 0)
+            text = chunk.get("text", "")
+            start_fmt = self._format_timestamp(start)
+            end_fmt = self._format_timestamp(end)
+            parts.append(f"[{i}] ({start_fmt} - {end_fmt}): {text}")
+        return "\n\n".join(parts)

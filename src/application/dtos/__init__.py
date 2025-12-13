@@ -9,6 +9,8 @@ from src.application.dtos.ingestion import (
 )
 from src.application.dtos.query import (
     CitationDTO,
+    CrossVideoRequest,
+    CrossVideoResponse,
     DecompositionInfo,
     EnabledContentTypes,
     GetSourcesRequest,
@@ -16,8 +18,11 @@ from src.application.dtos.query import (
     QueryModality,
     QueryVideoRequest,
     QueryVideoResponse,
+    RefinementInfo,
     SourcesResponse,
     SubTaskInfo,
+    ToolCall,
+    VideoResult,
 )
 
 __all__ = [
@@ -29,6 +34,8 @@ __all__ = [
     "ProcessingStep",
     # Query DTOs
     "CitationDTO",
+    "CrossVideoRequest",
+    "CrossVideoResponse",
     "DecompositionInfo",
     "EnabledContentTypes",
     "GetSourcesRequest",
@@ -36,6 +43,9 @@ __all__ = [
     "QueryModality",
     "QueryVideoRequest",
     "QueryVideoResponse",
+    "RefinementInfo",
     "SourcesResponse",
     "SubTaskInfo",
+    "ToolCall",
+    "VideoResult",
 ]

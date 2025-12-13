@@ -149,6 +149,20 @@ class QueryVideoRequest(BaseModel):
         default_factory=EnabledContentTypes,
         description="Content types to include in LLM context (multimodal)",
     )
+    enable_refinement: bool = Field(
+        default=False,
+        description="Enable confidence-based query refinement",
+    )
+    confidence_threshold: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence before triggering refinement",
+    )
+    enable_tools: bool = Field(
+        default=False,
+        description="Enable internal tool use during answer generation",
+    )
 
 
 class QueryVideoResponse(BaseModel):
@@ -217,3 +231,93 @@ class SourcesResponse(BaseModel):
 
     sources: list[SourceDetail] = Field(description="Detailed source information")
     expires_at: datetime = Field(description="When presigned URLs expire")
+
+
+# Cross-Video Query DTOs
+
+
+class CrossVideoRequest(BaseModel):
+    """Request to query across multiple videos."""
+
+    query: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="Natural language question",
+    )
+    video_ids: list[str] | None = Field(
+        default=None,
+        description="Video IDs to search. None = all videos",
+    )
+    max_videos: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Maximum videos to include in results",
+    )
+    max_citations_per_video: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum citations per video",
+    )
+    similarity_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum similarity score",
+    )
+    enabled_content_types: EnabledContentTypes = Field(
+        default_factory=EnabledContentTypes,
+        description="Content types to include",
+    )
+
+
+class VideoResult(BaseModel):
+    """Results from a single video in cross-video query."""
+
+    video_id: str = Field(description="Video identifier")
+    video_title: str = Field(description="Video title")
+    relevance_score: float = Field(description="Overall relevance to query")
+    citations: list[CitationDTO] = Field(description="Citations from this video")
+    summary: str | None = Field(
+        default=None,
+        description="Brief summary of findings from this video",
+    )
+
+
+class CrossVideoResponse(BaseModel):
+    """Response from cross-video query."""
+
+    answer: str = Field(description="Synthesized answer across all videos")
+    confidence: float = Field(description="Overall confidence")
+    video_results: list[VideoResult] = Field(description="Per-video results")
+    videos_searched: int = Field(description="Number of videos searched")
+    total_citations: int = Field(description="Total citations across all videos")
+    processing_time_ms: int = Field(description="Total processing time")
+
+
+# Tool Use DTOs
+
+
+class ToolCall(BaseModel):
+    """A tool call made during answer generation."""
+
+    tool_name: str = Field(description="Name of the tool called")
+    arguments: dict[str, str | int | float | bool] = Field(
+        description="Arguments passed to tool"
+    )
+    result_summary: str = Field(description="Brief summary of tool result")
+    timestamp_ms: int = Field(description="When the tool was called")
+
+
+class RefinementInfo(BaseModel):
+    """Information about query refinement attempts."""
+
+    was_refined: bool = Field(description="Whether refinement was triggered")
+    original_confidence: float = Field(description="Confidence before refinement")
+    final_confidence: float = Field(description="Confidence after refinement")
+    refinement_strategy: str | None = Field(
+        default=None,
+        description="Strategy used (expand_query, adjacent_chunks, lower_threshold)",
+    )
+    iterations: int = Field(default=1, description="Number of refinement iterations")

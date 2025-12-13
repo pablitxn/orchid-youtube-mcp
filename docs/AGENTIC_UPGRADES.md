@@ -287,9 +287,9 @@ Cuando `enabled_content_types.image=True`:
 - Para chunks de transcript: busca frames cercanos (±3s) y los incluye
 - El LLM "ve" lo que el video muestra mientras responde
 
-### 4. Iterative Retrieval con Confidence Loop
+### 4. Confidence Loop (Iterative Refinement)
 
-**Status**: 🔲 Pendiente
+**Status**: ✅ Implementado (`query_with_refinement`)
 
 ```python
 async def query_with_refinement(self, query: str, video_id: str) -> QueryResponse:
@@ -318,7 +318,7 @@ async def query_with_refinement(self, query: str, video_id: str) -> QueryRespons
 
 ### 5. Cross-Video Synthesis
 
-**Status**: 🔲 Pendiente
+**Status**: ✅ Implementado (`query_across_videos`)
 
 ```python
 async def query_across_videos(
@@ -332,7 +332,7 @@ async def query_across_videos(
 
 ### 6. Tool-Use Interno (Agentic RAG)
 
-**Status**: 🔲 Pendiente
+**Status**: ✅ Implementado (`query_with_tools`)
 
 El LLM puede llamar herramientas durante la generación:
 - `get_more_context(timestamp, window=30s)`
@@ -372,9 +372,9 @@ class QueryResponse:
 | 1 | Multimodal Message Builder | - | 🔥🔥🔥 | ✅ Done |
 | 2 | Query Decomposition | - | 🔥🔥🔥 | ✅ Done |
 | 3 | Vision-Augmented | #1 | 🔥🔥🔥 | ✅ Done |
-| 4 | Confidence Loop | - | 🔥🔥 | 🔲 Pending |
-| 5 | Cross-Video | #2 | 🔥🔥 | 🔲 Pending |
-| 6 | Tool-Use Interno | #1, #2 | 🔥🔥🔥🔥 | 🔲 Pending |
+| 4 | Confidence Loop | - | 🔥🔥 | ✅ Done |
+| 5 | Cross-Video | #2 | 🔥🔥 | ✅ Done |
+| 6 | Tool-Use Interno | #1, #2 | 🔥🔥🔥🔥 | ✅ Done |
 
 ---
 
