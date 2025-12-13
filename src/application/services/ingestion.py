@@ -1622,16 +1622,23 @@ class VideoIngestionService:
                 )
                 all_vectors.append(point)
 
+        # Log all chunks being embedded - FULL TEXT
+        self._logger.warning(f"=== EMBEDDING {len(chunks)} CHUNKS ===")
+        for i, chunk in enumerate(chunks):
+            self._logger.warning(
+                f"CHUNK {i} [{chunk.start_time:.1f}-{chunk.end_time:.1f}] "
+                f"len={len(chunk.text)}: {chunk.text}"
+            )
+
         # Ensure indexes exist for filtering
         await self._vector_db.ensure_payload_indexes(self._vectors_collection)
 
         # Upsert all vectors
-        self._logger.debug(
-            "Upserting vectors to vector DB",
-            extra={"vector_count": len(all_vectors)},
+        self._logger.warning(
+            f"UPSERTING {len(all_vectors)} vectors to {self._vectors_collection}"
         )
         await self._vector_db.upsert(self._vectors_collection, all_vectors)
-        self._logger.debug("Vector upsert complete")
+        self._logger.warning("UPSERT COMPLETE")
 
     async def _build_response_from_existing(
         self,
