@@ -5,7 +5,12 @@ import json
 import subprocess
 from pathlib import Path
 
-from src.infrastructure.video.base import VideoChunkerBase, VideoInfo, VideoSegment
+from src.infrastructure.video.base import (
+    AudioSegment,
+    VideoChunkerBase,
+    VideoInfo,
+    VideoSegment,
+)
 
 
 class FFmpegVideoChunker(VideoChunkerBase):
@@ -371,3 +376,121 @@ class FFmpegVideoChunker(VideoChunkerBase):
             size_bytes=size_bytes,
             has_audio=include_audio,
         )
+
+    async def chunk_audio(
+        self,
+        audio_path: Path,
+        output_dir: Path,
+        chunk_seconds: int = 60,
+        format: str = "mp3",
+        bitrate: str = "192k",
+    ) -> list[AudioSegment]:
+        """Split audio into chunks."""
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Get audio duration using ffprobe
+        duration = await self._get_audio_duration(audio_path)
+
+        segments: list[AudioSegment] = []
+        current_time = 0.0
+        chunk_idx = 0
+
+        while current_time < duration:
+            chunk_idx += 1
+            start_time = current_time
+            end_time = min(start_time + chunk_seconds, duration)
+
+            output_path = output_dir / f"audio_{chunk_idx:04d}.{format}"
+
+            segment = await self.extract_audio_segment(
+                audio_path=audio_path,
+                output_path=output_path,
+                start_time=start_time,
+                end_time=end_time,
+                format=format,
+                bitrate=bitrate,
+            )
+            segments.append(segment)
+
+            current_time = end_time
+
+        return segments
+
+    async def extract_audio_segment(
+        self,
+        audio_path: Path,
+        output_path: Path,
+        start_time: float,
+        end_time: float,
+        format: str = "mp3",
+        bitrate: str = "192k",
+    ) -> AudioSegment:
+        """Extract a specific segment from audio."""
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        duration = end_time - start_time
+
+        # Determine codec based on format
+        codec_map = {
+            "mp3": "libmp3lame",
+            "aac": "aac",
+            "wav": "pcm_s16le",
+            "flac": "flac",
+            "ogg": "libvorbis",
+        }
+        codec = codec_map.get(format, "libmp3lame")
+
+        cmd = [
+            self._ffmpeg,
+            "-ss",
+            str(start_time),
+            "-i",
+            str(audio_path),
+            "-t",
+            str(duration),
+            "-acodec",
+            codec,
+        ]
+
+        # Add bitrate for lossy formats
+        if format in ("mp3", "aac", "ogg"):
+            cmd.extend(["-ab", bitrate])
+
+        cmd.extend(["-y", str(output_path)])
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(cmd, capture_output=True, check=True),
+        )
+
+        size_bytes = output_path.stat().st_size
+
+        return AudioSegment(
+            path=output_path,
+            start_time=start_time,
+            end_time=end_time,
+            duration=duration,
+            size_bytes=size_bytes,
+            format=format,
+        )
+
+    async def _get_audio_duration(self, audio_path: Path) -> float:
+        """Get duration of an audio file using ffprobe."""
+        cmd = [
+            self._ffprobe,
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            str(audio_path),
+        ]
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(cmd, capture_output=True, check=True),
+        )
+
+        data = json.loads(result.stdout)
+        return float(data.get("format", {}).get("duration", 0))

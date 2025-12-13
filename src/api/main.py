@@ -15,8 +15,17 @@ from src.api.openapi.routes import health, ingestion, query, sources, videos
 from src.commons.telemetry import configure_logging
 
 
+def _get_formatter(log_format: str) -> logging.Formatter:
+    """Get the appropriate formatter based on format type."""
+    from src.commons.telemetry.logger import JsonFormatter, TextFormatter
+
+    if log_format == "json":
+        return JsonFormatter()
+    return TextFormatter()
+
+
 def _setup_logging() -> None:
-    """Configure logging early, before uvicorn handlers take over.
+    """Configure logging for the application.
 
     This must be called at module level to ensure our formatters
     are applied before uvicorn starts.
@@ -32,16 +41,42 @@ def _setup_logging() -> None:
         logger_name="src",
     )
 
-    # Also configure uvicorn loggers to use our format
-    # so all output is consistent
+    # Also configure root logger as fallback
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level.upper()))
+
+
+def _configure_uvicorn_logging() -> None:
+    """Configure uvicorn loggers to use our format.
+
+    Called during lifespan when uvicorn handlers are available.
+    """
+    settings = get_settings()
+    log_level = settings.telemetry.log_level or settings.app.log_level
+    log_format = settings.telemetry.log_format
+    formatter = _get_formatter(log_format)
+
+    # Configure uvicorn loggers to use our format for consistency
     uvicorn_loggers = ["uvicorn", "uvicorn.error", "uvicorn.access"]
     for logger_name in uvicorn_loggers:
         logger = logging.getLogger(logger_name)
-        # Only set level, let them keep their handlers but inherit our level
         logger.setLevel(getattr(logging, log_level.upper()))
+        # Replace formatter on existing handlers
+        for handler in logger.handlers:
+            handler.setFormatter(formatter)
+            handler.setLevel(getattr(logging, log_level.upper()))
+        # If no handlers yet, add one
+        if not logger.handlers:
+            import sys
+
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setFormatter(formatter)
+            handler.setLevel(getattr(logging, log_level.upper()))
+            logger.addHandler(handler)
+            logger.propagate = False
 
 
-# Configure logging at module import time (before uvicorn lifespan)
+# Configure logging at module import time
 _setup_logging()
 
 
@@ -52,6 +87,9 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     Initializes all infrastructure services on startup and
     cleanly shuts them down on application exit.
     """
+    # Configure uvicorn logging now that handlers exist
+    _configure_uvicorn_logging()
+
     settings = get_settings()
 
     # Initialize services

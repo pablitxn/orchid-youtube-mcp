@@ -45,6 +45,20 @@ class VideoSegment:
     has_audio: bool
 
 
+@dataclass
+class AudioSegment:
+    """A segment/chunk of audio."""
+
+    path: Path
+    start_time: float
+    end_time: float
+    duration: float
+    size_bytes: int
+    format: str
+    sample_rate: int = 44100
+    channels: int = 2
+
+
 class FrameExtractorBase(ABC):
     """Abstract base class for video frame extraction.
 
@@ -241,4 +255,50 @@ class VideoChunkerBase(ABC):
 
         Returns:
             List of video segments at scene boundaries.
+        """
+
+    @abstractmethod
+    async def chunk_audio(
+        self,
+        audio_path: Path,
+        output_dir: Path,
+        chunk_seconds: int = 60,
+        format: str = "mp3",
+        bitrate: str = "192k",
+    ) -> list[AudioSegment]:
+        """Split audio into chunks.
+
+        Args:
+            audio_path: Path to input audio file.
+            output_dir: Directory to save audio chunks.
+            chunk_seconds: Target chunk duration in seconds.
+            format: Output audio format (mp3, wav, etc.).
+            bitrate: Audio bitrate.
+
+        Returns:
+            List of audio segments with metadata.
+        """
+
+    @abstractmethod
+    async def extract_audio_segment(
+        self,
+        audio_path: Path,
+        output_path: Path,
+        start_time: float,
+        end_time: float,
+        format: str = "mp3",
+        bitrate: str = "192k",
+    ) -> AudioSegment:
+        """Extract a specific segment from audio.
+
+        Args:
+            audio_path: Path to input audio file.
+            output_path: Where to save the segment.
+            start_time: Start time in seconds.
+            end_time: End time in seconds.
+            format: Output audio format.
+            bitrate: Audio bitrate.
+
+        Returns:
+            Audio segment metadata.
         """

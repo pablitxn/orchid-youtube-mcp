@@ -29,6 +29,7 @@ def _create_ingestion_service(
         vector_db=factory.get_vector_db(),
         document_db=factory.get_document_db(),
         settings=settings,
+        video_chunker=factory.get_video_chunker(),
     )
 
 

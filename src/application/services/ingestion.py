@@ -19,6 +19,7 @@ from src.commons.infrastructure.vectordb.base import VectorDBBase, VectorPoint
 from src.commons.settings.models import Settings
 from src.commons.telemetry import LogContext, get_logger
 from src.domain.models.chunk import (
+    AudioChunk,
     FrameChunk,
     Modality,
     TranscriptChunk,
@@ -30,7 +31,7 @@ from src.infrastructure.transcription.base import (
     TranscriptionResult,
     TranscriptionServiceBase,
 )
-from src.infrastructure.video.base import FrameExtractorBase
+from src.infrastructure.video.base import FrameExtractorBase, VideoChunkerBase
 from src.infrastructure.youtube.base import YouTubeDownloaderBase
 from src.infrastructure.youtube.downloader import DownloadError, VideoNotFoundError
 
@@ -66,6 +67,7 @@ class VideoIngestionService:
         vector_db: VectorDBBase,
         document_db: DocumentDBBase,
         settings: Settings,
+        video_chunker: VideoChunkerBase | None = None,
     ) -> None:
         """Initialize ingestion service with dependencies.
 
@@ -78,11 +80,13 @@ class VideoIngestionService:
             vector_db: Vector database for embeddings.
             document_db: Document database for metadata.
             settings: Application settings.
+            video_chunker: Optional video/audio chunker for segment extraction.
         """
         self._downloader = youtube_downloader
         self._transcriber = transcription_service
         self._text_embedder = text_embedding_service
         self._frame_extractor = frame_extractor
+        self._video_chunker = video_chunker
         self._blob = blob_storage
         self._vector_db = vector_db
         self._document_db = document_db
@@ -93,9 +97,11 @@ class VideoIngestionService:
         self._videos_collection = settings.document_db.collections.videos
         self._chunks_collection = settings.document_db.collections.transcript_chunks
         self._frames_collection = settings.document_db.collections.frame_chunks
+        self._audio_chunks_collection = settings.document_db.collections.audio_chunks
         self._vectors_collection = settings.vector_db.collections.transcripts
         self._videos_bucket = settings.blob_storage.buckets.videos
         self._frames_bucket = settings.blob_storage.buckets.frames
+        self._chunks_bucket = settings.blob_storage.buckets.chunks
 
     async def ingest(  # noqa: PLR0912, PLR0915
         self,
@@ -312,6 +318,23 @@ class VideoIngestionService:
                         "Skipping Phase 3: Frame extraction not requested"
                     )
 
+                # Phase 3b: Extract audio chunks from blob (if requested)
+                audio_chunks: list[AudioChunk] = []
+                if request.extract_audio_chunks and self._video_chunker:
+                    self._logger.debug("Starting Phase 3b: Audio chunk extraction")
+                    audio_chunks = await self._extract_audio_chunks_from_blob(
+                        video_metadata, report_progress
+                    )
+                    self._logger.info(
+                        "Phase 3b complete: Audio chunks extracted",
+                        extra={"audio_chunk_count": len(audio_chunks)},
+                    )
+                elif request.extract_audio_chunks and not self._video_chunker:
+                    self._logger.warning(
+                        "Audio chunk extraction requested but video_chunker "
+                        "not available"
+                    )
+
                 # Phase 4: Create transcript chunks
                 chunk_settings = self._settings.chunking.transcript
                 self._logger.debug(
@@ -393,6 +416,16 @@ class VideoIngestionService:
                         [f.model_dump(mode="json") for f in frames],
                     )
 
+                if audio_chunks:
+                    self._logger.debug(
+                        "Inserting audio chunks",
+                        extra={"count": len(audio_chunks)},
+                    )
+                    await self._document_db.insert_many(
+                        self._audio_chunks_collection,
+                        [a.model_dump(mode="json") for a in audio_chunks],
+                    )
+
                 self._logger.info("Phase 6 complete: Chunks stored in document DB")
 
                 # Update final metadata
@@ -401,6 +434,7 @@ class VideoIngestionService:
                         "status": VideoStatus.READY,
                         "transcript_chunk_count": len(transcript_chunks),
                         "frame_chunk_count": len(frames),
+                        "audio_chunk_count": len(audio_chunks),
                         "updated_at": datetime.now(UTC),
                     }
                 )
@@ -413,6 +447,7 @@ class VideoIngestionService:
                         "elapsed_seconds": round(elapsed_seconds, 2),
                         "transcript_chunks": len(transcript_chunks),
                         "frame_chunks": len(frames),
+                        "audio_chunks": len(audio_chunks),
                     },
                 )
                 report_progress(
@@ -428,6 +463,7 @@ class VideoIngestionService:
                     chunk_counts={
                         "transcript": len(transcript_chunks),
                         "frame": len(frames),
+                        "audio": len(audio_chunks),
                     },
                     created_at=video_metadata.created_at,
                 )
@@ -510,6 +546,15 @@ class VideoIngestionService:
             for blob in frame_blobs:
                 await self._blob.delete(self._frames_bucket, blob.path)
 
+            # Delete blobs in chunks bucket (audio/video chunks)
+            if await self._blob.bucket_exists(self._chunks_bucket):
+                chunk_blobs = await self._blob.list_blobs(
+                    self._chunks_bucket,
+                    prefix=f"{video.id}/",
+                )
+                for blob in chunk_blobs:
+                    await self._blob.delete(self._chunks_bucket, blob.path)
+
             # Delete chunks from document DB
             await self._document_db.delete_many(
                 self._chunks_collection,
@@ -517,6 +562,10 @@ class VideoIngestionService:
             )
             await self._document_db.delete_many(
                 self._frames_collection,
+                {"video_id": video.id},
+            )
+            await self._document_db.delete_many(
+                self._audio_chunks_collection,
                 {"video_id": video.id},
             )
 
@@ -919,21 +968,36 @@ class VideoIngestionService:
                 blob_path = f"{video_metadata.id}/frames/frame_{i:05d}.jpg"
                 thumb_path = f"{video_metadata.id}/frames/thumb_{i:05d}.jpg"
 
+                # Upload full-resolution frame
                 with extracted_frame.path.open("rb") as f:
-                    frame_bytes = f.read()
                     await self._blob.upload(
                         self._frames_bucket,
                         blob_path,
-                        frame_bytes,
+                        f,
                         content_type="image/jpeg",
                     )
-                    # Use same image as thumbnail for now
-                    await self._blob.upload(
-                        self._frames_bucket,
-                        thumb_path,
-                        frame_bytes,
-                        content_type="image/jpeg",
-                    )
+
+                # Upload thumbnail (generated by frame extractor)
+                if (
+                    extracted_frame.thumbnail_path
+                    and extracted_frame.thumbnail_path.exists()
+                ):
+                    with extracted_frame.thumbnail_path.open("rb") as f:
+                        await self._blob.upload(
+                            self._frames_bucket,
+                            thumb_path,
+                            f,
+                            content_type="image/jpeg",
+                        )
+                else:
+                    # Fallback: use same image as thumbnail if not generated
+                    with extracted_frame.path.open("rb") as f:
+                        await self._blob.upload(
+                            self._frames_bucket,
+                            thumb_path,
+                            f,
+                            content_type="image/jpeg",
+                        )
 
                 frame_chunk = FrameChunk(
                     video_id=video_metadata.id,
@@ -995,21 +1059,36 @@ class VideoIngestionService:
                 blob_path = f"{video_id}/frames/frame_{i:05d}.jpg"
                 thumb_path = f"{video_id}/frames/thumb_{i:05d}.jpg"
 
+                # Upload full-resolution frame
                 with extracted_frame.path.open("rb") as f:
-                    frame_bytes = f.read()
                     await self._blob.upload(
                         self._frames_bucket,
                         blob_path,
-                        frame_bytes,
+                        f,
                         content_type="image/jpeg",
                     )
-                    # Use same image as thumbnail for now
-                    await self._blob.upload(
-                        self._frames_bucket,
-                        thumb_path,
-                        frame_bytes,
-                        content_type="image/jpeg",
-                    )
+
+                # Upload thumbnail (generated by frame extractor)
+                if (
+                    extracted_frame.thumbnail_path
+                    and extracted_frame.thumbnail_path.exists()
+                ):
+                    with extracted_frame.thumbnail_path.open("rb") as f:
+                        await self._blob.upload(
+                            self._frames_bucket,
+                            thumb_path,
+                            f,
+                            content_type="image/jpeg",
+                        )
+                else:
+                    # Fallback: use same image as thumbnail if not generated
+                    with extracted_frame.path.open("rb") as f:
+                        await self._blob.upload(
+                            self._frames_bucket,
+                            thumb_path,
+                            f,
+                            content_type="image/jpeg",
+                        )
 
                 frame_chunk = FrameChunk(
                     video_id=video_id,
@@ -1024,6 +1103,148 @@ class VideoIngestionService:
                 frames.append(frame_chunk)
 
         return frames
+
+    async def _extract_audio_chunks_from_blob(
+        self,
+        video_metadata: VideoMetadata,
+        report_progress: Callable[[ProcessingStep, float, float, str], None],
+    ) -> list[AudioChunk]:
+        """Download audio from blob and extract audio chunks.
+
+        This is Phase 3b of blob-first architecture: download audio from
+        blob storage to a temp file, extract audio segments, upload them,
+        then clean up.
+
+        Args:
+            video_metadata: Video metadata with audio blob path.
+            report_progress: Progress callback function.
+
+        Returns:
+            List of extracted AudioChunks.
+        """
+        report_progress(
+            ProcessingStep.EXTRACTING_AUDIO,
+            0.0,
+            0.42,
+            "Preparing audio for chunking...",
+        )
+
+        chunk_seconds = self._settings.chunking.audio.chunk_seconds
+        audio_chunks: list[AudioChunk] = []
+
+        self._logger.debug(
+            "Starting audio chunk extraction phase",
+            extra={
+                "video_id": video_metadata.id,
+                "blob_path_audio": video_metadata.blob_path_audio,
+                "chunk_seconds": chunk_seconds,
+                "duration_seconds": video_metadata.duration_seconds,
+                "expected_chunks": (video_metadata.duration_seconds // chunk_seconds)
+                + 1,
+            },
+        )
+
+        await self._ensure_bucket_exists(self._chunks_bucket)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            audio_local_path = temp_path / "audio.mp3"
+            audio_output_dir = temp_path / "audio_chunks"
+            audio_output_dir.mkdir()
+
+            self._logger.debug(
+                "Downloading audio from blob to temp file",
+                extra={"temp_dir": temp_dir, "target_path": str(audio_local_path)},
+            )
+
+            # Download audio from blob to temp file
+            await self._blob.download_to_file(
+                self._videos_bucket,
+                video_metadata.blob_path_audio,  # type: ignore[arg-type]
+                audio_local_path,
+            )
+
+            audio_size_mb = audio_local_path.stat().st_size / (1024 * 1024)
+            self._logger.debug(
+                "Audio downloaded to temp file",
+                extra={"size_mb": round(audio_size_mb, 2)},
+            )
+
+            report_progress(
+                ProcessingStep.EXTRACTING_AUDIO,
+                0.2,
+                0.44,
+                "Extracting audio segments...",
+            )
+
+            # Extract audio chunks using ffmpeg
+            assert self._video_chunker is not None
+            self._logger.debug("Calling video chunker for audio segmentation")
+            extracted_segments = await self._video_chunker.chunk_audio(
+                audio_path=audio_local_path,
+                output_dir=audio_output_dir,
+                chunk_seconds=chunk_seconds,
+                format="mp3",
+                bitrate="192k",
+            )
+
+            self._logger.debug(
+                "Audio chunk extraction complete",
+                extra={"extracted_count": len(extracted_segments)},
+            )
+
+            report_progress(
+                ProcessingStep.EXTRACTING_AUDIO,
+                0.6,
+                0.46,
+                "Uploading audio chunks...",
+            )
+
+            self._logger.debug(
+                "Starting audio chunk upload to blob storage",
+                extra={
+                    "bucket": self._chunks_bucket,
+                    "chunk_count": len(extracted_segments),
+                },
+            )
+
+            # Upload audio chunks to blob storage
+            for i, segment in enumerate(extracted_segments):
+                blob_path = f"{video_metadata.id}/audio/audio_{i:05d}.mp3"
+
+                with segment.path.open("rb") as f:
+                    await self._blob.upload(
+                        self._chunks_bucket,
+                        blob_path,
+                        f,
+                        content_type="audio/mpeg",
+                    )
+
+                audio_chunk = AudioChunk(
+                    video_id=video_metadata.id,
+                    start_time=segment.start_time,
+                    end_time=segment.end_time,
+                    blob_path=blob_path,
+                    format="mp3",
+                )
+                audio_chunks.append(audio_chunk)
+
+            self._logger.debug(
+                "Audio chunk upload complete",
+                extra={"uploaded_count": len(audio_chunks)},
+            )
+
+        # Temp files deleted here
+        self._logger.debug("Audio chunk extraction temp directory cleaned up")
+
+        report_progress(
+            ProcessingStep.EXTRACTING_AUDIO,
+            1.0,
+            0.48,
+            f"Extracted {len(audio_chunks)} audio chunks",
+        )
+
+        return audio_chunks
 
     def _create_transcript_chunks(
         self,
@@ -1221,6 +1442,41 @@ class VideoIngestionService:
             created_at=existing.get("created_at", started_at),
         )
 
+    async def _cleanup_existing_chunks(self, video_id: str) -> None:
+        """Clean up existing chunks for a video before re-inserting.
+
+        This ensures idempotency when resuming - we don't create duplicates.
+
+        Args:
+            video_id: The video ID to clean up chunks for.
+        """
+        self._logger.debug(
+            "Cleaning up existing chunks before resume",
+            extra={"video_id": video_id},
+        )
+
+        # Delete existing chunks from document DB
+        await self._document_db.delete_many(
+            self._chunks_collection,
+            {"video_id": video_id},
+        )
+        await self._document_db.delete_many(
+            self._frames_collection,
+            {"video_id": video_id},
+        )
+        await self._document_db.delete_many(
+            self._audio_chunks_collection,
+            {"video_id": video_id},
+        )
+
+        # Delete existing embeddings from vector DB
+        await self._vector_db.delete_by_filter(
+            self._vectors_collection,
+            {"video_id": video_id},
+        )
+
+        self._logger.debug("Existing chunks cleaned up")
+
     async def _resume_from_status(
         self,
         video_metadata: VideoMetadata,
@@ -1230,7 +1486,8 @@ class VideoIngestionService:
         """Resume ingestion from the last successful step.
 
         Determines which step to resume from based on VideoStatus and
-        continues the pipeline from there.
+        continues the pipeline from there. Cleans up existing chunks
+        to ensure idempotency.
 
         Args:
             video_metadata: Video metadata with current status.
@@ -1242,6 +1499,7 @@ class VideoIngestionService:
         """
         transcription: TranscriptionResult | None = None
         frames: list[FrameChunk] = []
+        audio_chunks: list[AudioChunk] = []
 
         self._logger.info(
             "Resuming ingestion from previous state",
@@ -1251,6 +1509,9 @@ class VideoIngestionService:
                 "current_status": video_metadata.status.value,
             },
         )
+
+        # Clean up existing chunks to ensure idempotency
+        await self._cleanup_existing_chunks(video_metadata.id)
 
         # Determine starting point based on status
         if video_metadata.status in (
@@ -1271,6 +1532,13 @@ class VideoIngestionService:
             self._logger.debug("Resume: Extracting frames")
             # Extract frames if requested
             frames = await self._extract_frames_from_blob(
+                video_metadata, report_progress
+            )
+
+        # Extract audio chunks if requested and chunker available
+        if request.extract_audio_chunks and self._video_chunker:
+            self._logger.debug("Resume: Extracting audio chunks")
+            audio_chunks = await self._extract_audio_chunks_from_blob(
                 video_metadata, report_progress
             )
 
@@ -1342,12 +1610,19 @@ class VideoIngestionService:
                 [f.model_dump(mode="json") for f in frames],
             )
 
+        if audio_chunks:
+            await self._document_db.insert_many(
+                self._audio_chunks_collection,
+                [a.model_dump(mode="json") for a in audio_chunks],
+            )
+
         # Update final metadata
         video_metadata = video_metadata.model_copy(
             update={
                 "status": VideoStatus.READY,
                 "transcript_chunk_count": len(transcript_chunks),
                 "frame_chunk_count": len(frames),
+                "audio_chunk_count": len(audio_chunks),
                 "updated_at": datetime.now(UTC),
             }
         )
@@ -1359,6 +1634,7 @@ class VideoIngestionService:
                 "video_id": video_metadata.id,
                 "transcript_chunks": len(transcript_chunks),
                 "frame_chunks": len(frames),
+                "audio_chunks": len(audio_chunks),
             },
         )
         report_progress(ProcessingStep.COMPLETED, 1.0, 1.0, "Ingestion complete!")
@@ -1372,6 +1648,7 @@ class VideoIngestionService:
             chunk_counts={
                 "transcript": len(transcript_chunks),
                 "frame": len(frames),
+                "audio": len(audio_chunks),
             },
             created_at=video_metadata.created_at,
         )
