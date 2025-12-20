@@ -9,7 +9,17 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from langfuse import Langfuse
+# Lazy import for Langfuse to handle Python 3.14 compatibility issues
+_langfuse_available = False
+_langfuse_import_error: str | None = None
+
+try:
+    from langfuse import Langfuse
+
+    _langfuse_available = True
+except Exception as e:
+    _langfuse_import_error = str(e)
+    Langfuse = None
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -44,6 +54,14 @@ def init_langfuse(settings: LangfuseSettings) -> None:
     """
     if not settings.enabled:
         logger.info("Langfuse is disabled")
+        _state.enabled = False
+        return
+
+    if not _langfuse_available:
+        logger.warning(
+            "Langfuse not available (import failed), tracing disabled",
+            extra={"error": _langfuse_import_error},
+        )
         _state.enabled = False
         return
 
