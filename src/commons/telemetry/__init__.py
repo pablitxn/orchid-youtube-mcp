@@ -1,6 +1,17 @@
 """Telemetry module - logging, tracing, and metrics."""
 
 from src.commons.telemetry.decorators import LogContext, log_exceptions, timed, trace
+from src.commons.telemetry.langfuse_client import (
+    create_llm_generation,
+    end_llm_generation,
+    flush_langfuse,
+    get_current_trace,
+    get_langfuse,
+    init_langfuse,
+    is_langfuse_enabled,
+    langfuse_trace,
+    shutdown_langfuse,
+)
 from src.commons.telemetry.logger import (
     JsonFormatter,
     TextFormatter,
@@ -31,4 +42,14 @@ __all__ = [
     "get_log_context",
     "set_log_context",
     "clear_log_context",
+    # Langfuse
+    "init_langfuse",
+    "shutdown_langfuse",
+    "get_langfuse",
+    "is_langfuse_enabled",
+    "langfuse_trace",
+    "get_current_trace",
+    "create_llm_generation",
+    "end_llm_generation",
+    "flush_langfuse",
 ]

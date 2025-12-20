@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 
 from anthropic import AsyncAnthropic
 
+from src.commons.telemetry import create_llm_generation, end_llm_generation
 from src.infrastructure.llm.base import (
     FunctionCall,
     FunctionDefinition,
@@ -105,25 +106,70 @@ class AnthropicLLMService(LLMServiceBase):
         if system_prompt:
             kwargs["system"] = system_prompt
 
-        response = await self._client.messages.create(**kwargs)
+        # Create Langfuse generation for tracing
+        input_for_trace = [
+            {"role": m["role"], "content": str(m.get("content", ""))}
+            for m in anthropic_messages
+        ]
+        if system_prompt:
+            input_for_trace.insert(0, {"role": "system", "content": system_prompt})
 
-        # Extract text content
-        content = ""
-        for block in response.content:
-            if block.type == "text":
-                content = block.text
-                break
-
-        return LLMResponse(
-            content=content,
-            finish_reason=response.stop_reason or "end_turn",
-            usage=LLMUsage(
-                prompt_tokens=response.usage.input_tokens,
-                completion_tokens=response.usage.output_tokens,
-                total_tokens=response.usage.input_tokens + response.usage.output_tokens,
-            ),
-            model=response.model,
+        generation = create_llm_generation(
+            name="anthropic_messages",
+            model=use_model,
+            input_messages=input_for_trace,
+            model_parameters={
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            },
+            metadata={"provider": "anthropic"},
         )
+
+        try:
+            response = await self._client.messages.create(**kwargs)
+
+            # Extract text content
+            content = ""
+            for block in response.content:
+                if block.type == "text":
+                    content = block.text
+                    break
+
+            result = LLMResponse(
+                content=content,
+                finish_reason=response.stop_reason or "end_turn",
+                usage=LLMUsage(
+                    prompt_tokens=response.usage.input_tokens,
+                    completion_tokens=response.usage.output_tokens,
+                    total_tokens=response.usage.input_tokens
+                    + response.usage.output_tokens,
+                ),
+                model=response.model,
+            )
+
+            # End Langfuse generation with success
+            end_llm_generation(
+                generation=generation,
+                output=result.content,
+                usage={
+                    "prompt_tokens": result.usage.prompt_tokens,
+                    "completion_tokens": result.usage.completion_tokens,
+                    "total_tokens": result.usage.total_tokens,
+                },
+                metadata={"finish_reason": result.finish_reason},
+            )
+
+            return result
+
+        except Exception as e:
+            # End Langfuse generation with error
+            end_llm_generation(
+                generation=generation,
+                output=None,
+                level="ERROR",
+                status_message=str(e),
+            )
+            raise
 
     async def generate_stream(
         self,
@@ -174,36 +220,91 @@ class AnthropicLLMService(LLMServiceBase):
         if system_prompt:
             kwargs["system"] = system_prompt
 
-        response = await self._client.messages.create(**kwargs)
+        # Create Langfuse generation for tracing
+        input_for_trace = [
+            {"role": m["role"], "content": str(m.get("content", ""))}
+            for m in anthropic_messages
+        ]
+        if system_prompt:
+            input_for_trace.insert(0, {"role": "system", "content": system_prompt})
 
-        # Extract content and tool calls
-        content: str | None = None
-        function_calls: list[FunctionCall] = []
-
-        for block in response.content:
-            if block.type == "text":
-                content = block.text
-            elif block.type == "tool_use":
-                function_calls.append(
-                    FunctionCall(
-                        name=block.name,
-                        arguments=dict(block.input)
-                        if isinstance(block.input, dict)
-                        else {},
-                    )
-                )
-
-        return LLMResponseWithTools(
-            content=content,
-            finish_reason=response.stop_reason or "end_turn",
-            usage=LLMUsage(
-                prompt_tokens=response.usage.input_tokens,
-                completion_tokens=response.usage.output_tokens,
-                total_tokens=response.usage.input_tokens + response.usage.output_tokens,
-            ),
-            model=response.model,
-            function_calls=function_calls,
+        generation = create_llm_generation(
+            name="anthropic_messages_with_tools",
+            model=use_model,
+            input_messages=input_for_trace,
+            model_parameters={
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "tools": [f.name for f in functions],
+            },
+            metadata={"provider": "anthropic", "has_tools": True},
         )
+
+        try:
+            response = await self._client.messages.create(**kwargs)
+
+            # Extract content and tool calls
+            content: str | None = None
+            function_calls: list[FunctionCall] = []
+
+            for block in response.content:
+                if block.type == "text":
+                    content = block.text
+                elif block.type == "tool_use":
+                    function_calls.append(
+                        FunctionCall(
+                            name=block.name,
+                            arguments=dict(block.input)
+                            if isinstance(block.input, dict)
+                            else {},
+                        )
+                    )
+
+            result = LLMResponseWithTools(
+                content=content,
+                finish_reason=response.stop_reason or "end_turn",
+                usage=LLMUsage(
+                    prompt_tokens=response.usage.input_tokens,
+                    completion_tokens=response.usage.output_tokens,
+                    total_tokens=response.usage.input_tokens
+                    + response.usage.output_tokens,
+                ),
+                model=response.model,
+                function_calls=function_calls,
+            )
+
+            # End Langfuse generation with success
+            end_llm_generation(
+                generation=generation,
+                output={
+                    "content": result.content,
+                    "function_calls": [
+                        {"name": fc.name, "arguments": fc.arguments}
+                        for fc in result.function_calls
+                    ],
+                },
+                usage={
+                    "prompt_tokens": result.usage.prompt_tokens,
+                    "completion_tokens": result.usage.completion_tokens,
+                    "total_tokens": result.usage.total_tokens,
+                },
+                metadata={
+                    "finish_reason": result.finish_reason,
+                    "tool_calls_count": len(result.function_calls),
+                },
+            )
+
+            return result
+
+        except Exception as e:
+            # End Langfuse generation with error
+            end_llm_generation(
+                generation=generation,
+                output=None,
+                level="ERROR",
+                status_message=str(e),
+            )
+            raise
 
     def _convert_messages(
         self,

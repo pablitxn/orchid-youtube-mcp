@@ -9,6 +9,7 @@ from src.application.services.ingestion import VideoIngestionService
 from src.application.services.query import VideoQueryService
 from src.commons.settings.loader import get_settings as _load_settings
 from src.commons.settings.models import Settings
+from src.commons.telemetry import init_langfuse, shutdown_langfuse
 from src.infrastructure.factory import (
     InfrastructureFactory,
     get_factory,
@@ -102,6 +103,9 @@ async def init_services(settings: Settings) -> None:
     Args:
         settings: Application settings.
     """
+    # Initialize Langfuse for LLM observability
+    init_langfuse(settings.telemetry.langfuse)
+
     # Initialize factory with settings
     factory = get_factory(settings)
 
@@ -119,5 +123,7 @@ async def shutdown_services() -> None:
     except ValueError:
         pass  # Factory not initialized
     finally:
+        # Shutdown Langfuse and flush pending events
+        shutdown_langfuse()
         reset_factory()
         get_settings.cache_clear()

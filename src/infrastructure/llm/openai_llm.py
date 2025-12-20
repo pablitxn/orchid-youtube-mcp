@@ -12,6 +12,7 @@ from openai.types.chat import (
     ChatCompletionToolParam,
 )
 
+from src.commons.telemetry import create_llm_generation, end_llm_generation
 from src.infrastructure.llm.base import (
     FunctionCall,
     FunctionDefinition,
@@ -98,21 +99,62 @@ class OpenAILLMService(LLMServiceBase):
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
-        response = await self._client.chat.completions.create(**kwargs)
-
-        choice = response.choices[0]
-        usage = response.usage
-
-        return LLMResponse(
-            content=choice.message.content or "",
-            finish_reason=choice.finish_reason or "stop",
-            usage=LLMUsage(
-                prompt_tokens=usage.prompt_tokens if usage else 0,
-                completion_tokens=usage.completion_tokens if usage else 0,
-                total_tokens=usage.total_tokens if usage else 0,
-            ),
-            model=response.model,
+        # Create Langfuse generation for tracing
+        generation = create_llm_generation(
+            name="openai_chat_completion",
+            model=use_model,
+            input_messages=[
+                {"role": m["role"], "content": str(m.get("content", ""))}
+                for m in openai_messages
+            ],
+            model_parameters={
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "json_mode": json_mode,
+            },
+            metadata={"provider": "openai"},
         )
+
+        try:
+            response = await self._client.chat.completions.create(**kwargs)
+
+            choice = response.choices[0]
+            usage = response.usage
+
+            result = LLMResponse(
+                content=choice.message.content or "",
+                finish_reason=choice.finish_reason or "stop",
+                usage=LLMUsage(
+                    prompt_tokens=usage.prompt_tokens if usage else 0,
+                    completion_tokens=usage.completion_tokens if usage else 0,
+                    total_tokens=usage.total_tokens if usage else 0,
+                ),
+                model=response.model,
+            )
+
+            # End Langfuse generation with success
+            end_llm_generation(
+                generation=generation,
+                output=result.content,
+                usage={
+                    "prompt_tokens": result.usage.prompt_tokens,
+                    "completion_tokens": result.usage.completion_tokens,
+                    "total_tokens": result.usage.total_tokens,
+                },
+                metadata={"finish_reason": result.finish_reason},
+            )
+
+            return result
+
+        except Exception as e:
+            # End Langfuse generation with error
+            end_llm_generation(
+                generation=generation,
+                output=None,
+                level="ERROR",
+                status_message=str(e),
+            )
+            raise
 
     async def generate_stream(
         self,
@@ -150,46 +192,96 @@ class OpenAILLMService(LLMServiceBase):
         openai_messages = self._convert_messages(messages, use_model)
         tools = self._convert_functions(functions)
 
-        response = await self._client.chat.completions.create(
+        # Create Langfuse generation for tracing
+        generation = create_llm_generation(
+            name="openai_chat_completion_with_tools",
             model=use_model,
-            messages=openai_messages,
-            tools=tools,
-            temperature=temperature,
-            max_tokens=max_tokens,
+            input_messages=[
+                {"role": m["role"], "content": str(m.get("content", ""))}
+                for m in openai_messages
+            ],
+            model_parameters={
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "tools": [f.name for f in functions],
+            },
+            metadata={"provider": "openai", "has_tools": True},
         )
 
-        choice = response.choices[0]
-        usage = response.usage
-        message = choice.message
+        try:
+            response = await self._client.chat.completions.create(
+                model=use_model,
+                messages=openai_messages,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
 
-        function_calls: list[FunctionCall] = []
-        if message.tool_calls:
-            for tool_call in message.tool_calls:
-                if hasattr(tool_call, "function") and tool_call.function:
-                    func = tool_call.function
-                    try:
-                        args = json.loads(func.arguments)
-                    except json.JSONDecodeError:
-                        args = {}
+            choice = response.choices[0]
+            usage = response.usage
+            message = choice.message
 
-                    function_calls.append(
-                        FunctionCall(
-                            name=func.name,
-                            arguments=args,
+            function_calls: list[FunctionCall] = []
+            if message.tool_calls:
+                for tool_call in message.tool_calls:
+                    if hasattr(tool_call, "function") and tool_call.function:
+                        func = tool_call.function
+                        try:
+                            args = json.loads(func.arguments)
+                        except json.JSONDecodeError:
+                            args = {}
+
+                        function_calls.append(
+                            FunctionCall(
+                                name=func.name,
+                                arguments=args,
+                            )
                         )
-                    )
 
-        return LLMResponseWithTools(
-            content=message.content,
-            finish_reason=choice.finish_reason or "stop",
-            usage=LLMUsage(
-                prompt_tokens=usage.prompt_tokens if usage else 0,
-                completion_tokens=usage.completion_tokens if usage else 0,
-                total_tokens=usage.total_tokens if usage else 0,
-            ),
-            model=response.model,
-            function_calls=function_calls,
-        )
+            result = LLMResponseWithTools(
+                content=message.content,
+                finish_reason=choice.finish_reason or "stop",
+                usage=LLMUsage(
+                    prompt_tokens=usage.prompt_tokens if usage else 0,
+                    completion_tokens=usage.completion_tokens if usage else 0,
+                    total_tokens=usage.total_tokens if usage else 0,
+                ),
+                model=response.model,
+                function_calls=function_calls,
+            )
+
+            # End Langfuse generation with success
+            end_llm_generation(
+                generation=generation,
+                output={
+                    "content": result.content,
+                    "function_calls": [
+                        {"name": fc.name, "arguments": fc.arguments}
+                        for fc in result.function_calls
+                    ],
+                },
+                usage={
+                    "prompt_tokens": result.usage.prompt_tokens,
+                    "completion_tokens": result.usage.completion_tokens,
+                    "total_tokens": result.usage.total_tokens,
+                },
+                metadata={
+                    "finish_reason": result.finish_reason,
+                    "tool_calls_count": len(result.function_calls),
+                },
+            )
+
+            return result
+
+        except Exception as e:
+            # End Langfuse generation with error
+            end_llm_generation(
+                generation=generation,
+                output=None,
+                level="ERROR",
+                status_message=str(e),
+            )
+            raise
 
     def _convert_messages(
         self,

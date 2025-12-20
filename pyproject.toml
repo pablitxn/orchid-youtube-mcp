@@ -27,6 +27,8 @@ dependencies = [
     "tenacity>=9.0.0",  # retry logic
     # MCP Server
     "mcp>=1.0.0",
+    # Observability
+    "langfuse>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -140,6 +142,7 @@ module = [
     "starlette.*",
     "uvicorn.*",
     "mcp.*",
+    "langfuse.*",
 ]
 ignore_missing_imports = true
 
