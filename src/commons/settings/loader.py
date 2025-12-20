@@ -17,6 +17,8 @@ class SettingsLoader:
     3. Base config (appsettings.json)
     """
 
+    ENV_PREFIX = "YOUTUBE_RAG__"
+
     def __init__(
         self,
         config_dir: Path | None = None,
@@ -48,8 +50,77 @@ class SettingsLoader:
         env_config = self._load_json(f"appsettings.{self.environment}.json")
         config = self._deep_merge(config, env_config)
 
-        # 3. Create Settings (env vars loaded automatically by Pydantic)
+        # 3. Merge environment variables (highest precedence)
+        env_overrides = self._load_env_vars()
+        config = self._deep_merge(config, env_overrides)
+
+        # 4. Create Settings with merged config
         return Settings(**config)
+
+    def _load_env_vars(self) -> dict[str, Any]:
+        """Load environment variables with the YOUTUBE_RAG__ prefix.
+
+        Parses env vars like YOUTUBE_RAG__DOCUMENT_DB__HOST into nested dicts:
+        {"document_db": {"host": "value"}}
+
+        Returns:
+            Nested dictionary of environment variable overrides.
+        """
+        result: dict[str, Any] = {}
+
+        for key, value in os.environ.items():
+            if not key.startswith(self.ENV_PREFIX):
+                continue
+
+            # Remove prefix and split by double underscore
+            key_path = key[len(self.ENV_PREFIX) :].lower().split("__")
+
+            # Navigate/create nested structure
+            current = result
+            for part in key_path[:-1]:
+                if part not in current:
+                    current[part] = {}
+                current = current[part]
+
+            # Set the final value, attempting type coercion
+            final_key = key_path[-1]
+            current[final_key] = self._coerce_value(value)
+
+        return result
+
+    def _coerce_value(self, value: str) -> Any:
+        """Coerce string environment variable to appropriate type.
+
+        Args:
+            value: String value from environment.
+
+        Returns:
+            Coerced value (bool, int, float, or original string).
+        """
+        # Boolean
+        if value.lower() in ("true", "false"):
+            return value.lower() == "true"
+
+        # Try integer
+        try:
+            return int(value)
+        except ValueError:
+            pass
+
+        # Try float
+        try:
+            return float(value)
+        except ValueError:
+            pass
+
+        # Try JSON (for lists/dicts like CORS_ORIGINS)
+        if value.startswith(("[", "{")):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                pass
+
+        return value
 
     def _load_json(self, filename: str) -> dict[str, Any]:
         """Load JSON config file.

@@ -282,3 +282,153 @@ class TestGetSettings:
             reset_settings()
             settings2 = get_settings(config_dir=Path(tmpdir))
             assert settings1 is not settings2
+
+
+class TestEnvVarOverrides:
+    """Tests for environment variable override functionality."""
+
+    def setup_method(self):
+        reset_settings()
+        # Store original env vars
+        self._original_env = {
+            k: v for k, v in os.environ.items() if k.startswith("YOUTUBE_RAG__")
+        }
+
+    def teardown_method(self):
+        reset_settings()
+        # Clean up test env vars
+        for key in list(os.environ.keys()):
+            if key.startswith("YOUTUBE_RAG__"):
+                del os.environ[key]
+        # Restore original env vars
+        os.environ.update(self._original_env)
+
+    def test_env_var_overrides_json_config(self):
+        """Verify env vars override JSON config values (critical for deployment)."""
+        with TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            # JSON config with localhost (like in development)
+            base_config = {
+                "document_db": {
+                    "host": "localhost",
+                    "port": 27017,
+                    "database": "test_db",
+                },
+            }
+            with (config_dir / "appsettings.json").open("w") as f:
+                json.dump(base_config, f)
+
+            # Set env var (like Kubernetes ConfigMap would)
+            os.environ["YOUTUBE_RAG__DOCUMENT_DB__HOST"] = (
+                "mongodb.shared-databases.svc.cluster.local"
+            )
+
+            loader = SettingsLoader(config_dir=config_dir, environment="dev")
+            settings = loader.load()
+
+            # Env var should override JSON config
+            assert settings.document_db.host == (
+                "mongodb.shared-databases.svc.cluster.local"
+            )
+            # Non-overridden values should come from JSON
+            assert settings.document_db.port == 27017
+            assert settings.document_db.database == "test_db"
+
+    def test_env_var_overrides_deeply_nested(self):
+        """Test env var overrides work for deeply nested settings."""
+        with TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            base_config = {
+                "blob_storage": {
+                    "endpoint": "localhost:9000",
+                    "buckets": {"videos": "old-videos", "frames": "old-frames"},
+                },
+            }
+            with (config_dir / "appsettings.json").open("w") as f:
+                json.dump(base_config, f)
+
+            os.environ["YOUTUBE_RAG__BLOB_STORAGE__ENDPOINT"] = (
+                "minio.cluster.local:9000"
+            )
+            os.environ["YOUTUBE_RAG__BLOB_STORAGE__BUCKETS__VIDEOS"] = "new-videos"
+
+            loader = SettingsLoader(config_dir=config_dir, environment="dev")
+            settings = loader.load()
+
+            assert settings.blob_storage.endpoint == "minio.cluster.local:9000"
+            assert settings.blob_storage.buckets.videos == "new-videos"
+            # Non-overridden nested value
+            assert settings.blob_storage.buckets.frames == "old-frames"
+
+    def test_env_var_type_coercion_bool(self):
+        """Test boolean env var coercion."""
+        with TemporaryDirectory() as tmpdir:
+            os.environ["YOUTUBE_RAG__APP__DEBUG"] = "true"
+            os.environ["YOUTUBE_RAG__SERVER__RELOAD"] = "false"
+
+            loader = SettingsLoader(config_dir=Path(tmpdir), environment="dev")
+            settings = loader.load()
+
+            assert settings.app.debug is True
+            assert settings.server.reload is False
+
+    def test_env_var_type_coercion_int(self):
+        """Test integer env var coercion."""
+        with TemporaryDirectory() as tmpdir:
+            os.environ["YOUTUBE_RAG__SERVER__PORT"] = "9000"
+            os.environ["YOUTUBE_RAG__SERVER__WORKERS"] = "4"
+
+            loader = SettingsLoader(config_dir=Path(tmpdir), environment="dev")
+            settings = loader.load()
+
+            assert settings.server.port == 9000
+            assert settings.server.workers == 4
+
+    def test_env_var_type_coercion_float(self):
+        """Test float env var coercion."""
+        with TemporaryDirectory() as tmpdir:
+            os.environ["YOUTUBE_RAG__LLM__TEMPERATURE"] = "0.5"
+            os.environ["YOUTUBE_RAG__CHUNKING__FRAME__INTERVAL_SECONDS"] = "1.5"
+
+            loader = SettingsLoader(config_dir=Path(tmpdir), environment="dev")
+            settings = loader.load()
+
+            assert settings.llm.temperature == 0.5
+            assert settings.chunking.frame.interval_seconds == 1.5
+
+    def test_env_var_type_coercion_json_list(self):
+        """Test JSON list env var coercion."""
+        with TemporaryDirectory() as tmpdir:
+            os.environ["YOUTUBE_RAG__SERVER__CORS_ORIGINS"] = (
+                '["https://example.com", "http://localhost:3000"]'
+            )
+
+            loader = SettingsLoader(config_dir=Path(tmpdir), environment="dev")
+            settings = loader.load()
+
+            assert settings.server.cors_origins == [
+                "https://example.com",
+                "http://localhost:3000",
+            ]
+
+    def test_env_vars_override_environment_specific_config(self):
+        """Env vars should override even environment-specific JSON config."""
+        with TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            # Base config
+            base_config = {"server": {"port": 8000}}
+            with (config_dir / "appsettings.json").open("w") as f:
+                json.dump(base_config, f)
+
+            # Prod config overrides base
+            prod_config = {"server": {"port": 8080}}
+            with (config_dir / "appsettings.prod.json").open("w") as f:
+                json.dump(prod_config, f)
+
+            # Env var should override prod config
+            os.environ["YOUTUBE_RAG__SERVER__PORT"] = "9000"
+
+            loader = SettingsLoader(config_dir=config_dir, environment="prod")
+            settings = loader.load()
+
+            assert settings.server.port == 9000
