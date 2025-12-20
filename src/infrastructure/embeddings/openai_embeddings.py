@@ -77,12 +77,24 @@ class OpenAIEmbeddingService(EmbeddingServiceBase):
         if not texts:
             return []
 
+        # Validate and sanitize inputs - OpenAI API rejects empty strings
+        sanitized_texts: list[str] = []
+        for i, text in enumerate(texts):
+            if text is None:
+                raise ValueError(f"Text at index {i} is None, expected string")
+            if not isinstance(text, str):
+                raise ValueError(
+                    f"Text at index {i} has type {type(text).__name__}, expected str"
+                )
+            # Replace empty strings with a single space (minimum valid input)
+            sanitized_texts.append(text if text.strip() else " ")
+
         use_model = model or self._model
 
         # Process in batches of max_batch_size
         results: list[EmbeddingResult] = []
-        for i in range(0, len(texts), self.max_batch_size):
-            batch = texts[i : i + self.max_batch_size]
+        for i in range(0, len(sanitized_texts), self.max_batch_size):
+            batch = sanitized_texts[i : i + self.max_batch_size]
 
             response = await self._client.embeddings.create(
                 model=use_model,
