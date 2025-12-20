@@ -1645,17 +1645,20 @@ class VideoIngestionService:
                 segment_idx += 1
 
             if chunk_text_parts:
-                avg_confidence = sum(chunk_confidences) / len(chunk_confidences)
-                chunk = TranscriptChunk(
-                    video_id=video_id,
-                    text=" ".join(chunk_text_parts),
-                    language=language,
-                    confidence=avg_confidence,
-                    start_time=current_start,
-                    end_time=actual_end,
-                    word_timestamps=chunk_words,
-                )
-                chunks.append(chunk)
+                # Join and check for actual content (not just whitespace)
+                chunk_text = " ".join(chunk_text_parts).strip()
+                if chunk_text:  # Skip chunks with no actual text content
+                    avg_confidence = sum(chunk_confidences) / len(chunk_confidences)
+                    chunk = TranscriptChunk(
+                        video_id=video_id,
+                        text=chunk_text,
+                        language=language,
+                        confidence=avg_confidence,
+                        start_time=current_start,
+                        end_time=actual_end,
+                        word_timestamps=chunk_words,
+                    )
+                    chunks.append(chunk)
 
             # Move to next chunk with overlap
             current_start = chunk_end - overlap_seconds
