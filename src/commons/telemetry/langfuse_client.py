@@ -1,4 +1,9 @@
-"""Langfuse integration for LLM observability."""
+"""Langfuse integration for LLM observability.
+
+This module uses true lazy imports for Langfuse to avoid the Pydantic V1
+compatibility warning on Python 3.14+. The langfuse package is only imported
+when it's actually needed (i.e., when Langfuse is enabled in settings).
+"""
 
 from __future__ import annotations
 
@@ -9,22 +14,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-# Lazy import for Langfuse to handle Python 3.14 compatibility issues
-_langfuse_available = False
-_langfuse_import_error: str | None = None
-
-try:
-    from langfuse import Langfuse
-
-    _langfuse_available = True
-except Exception as e:
-    _langfuse_import_error = str(e)
-    Langfuse = None
-
 if TYPE_CHECKING:
     from collections.abc import Generator
-
-    from langfuse.client import StatefulGenerationClient, StatefulTraceClient
 
     from src.commons.settings.models import LangfuseSettings
 
@@ -32,10 +23,47 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class _LangfuseImportState:
+    """State holder for lazy langfuse import."""
+
+    module: Any = None  # Langfuse class once imported
+    import_error: str | None = None
+    attempted: bool = False
+
+
+# Singleton for import state
+_import_state = _LangfuseImportState()
+
+
+def _import_langfuse() -> tuple[Any, str | None]:
+    """Lazily import the langfuse module.
+
+    Returns:
+        Tuple of (Langfuse class or None, error message or None).
+    """
+    if _import_state.module is not None:
+        return _import_state.module, None
+
+    if _import_state.attempted:
+        return None, _import_state.import_error
+
+    _import_state.attempted = True
+
+    try:
+        from langfuse import Langfuse
+
+        _import_state.module = Langfuse
+        return Langfuse, None
+    except Exception as e:
+        _import_state.import_error = str(e)
+        return None, _import_state.import_error
+
+
+@dataclass
 class _LangfuseState:
     """Internal state holder for Langfuse client."""
 
-    client: Langfuse | None = None
+    client: Any = None  # Langfuse instance, typed as Any to avoid import
     enabled: bool = False
     current_trace: ContextVar[Any] = field(
         default_factory=lambda: ContextVar("current_trace", default=None)
@@ -57,10 +85,13 @@ def init_langfuse(settings: LangfuseSettings) -> None:
         _state.enabled = False
         return
 
-    if not _langfuse_available:
+    # Only import langfuse when it's actually needed
+    langfuse_class, import_error = _import_langfuse()
+
+    if langfuse_class is None:
         logger.warning(
             "Langfuse not available (import failed), tracing disabled",
-            extra={"error": _langfuse_import_error},
+            extra={"error": import_error},
         )
         _state.enabled = False
         return
@@ -71,7 +102,7 @@ def init_langfuse(settings: LangfuseSettings) -> None:
         return
 
     try:
-        _state.client = Langfuse(
+        _state.client = langfuse_class(
             public_key=settings.public_key,
             secret_key=settings.secret_key,
             host=settings.host,
@@ -101,7 +132,7 @@ def shutdown_langfuse() -> None:
             _state.enabled = False
 
 
-def get_langfuse() -> Langfuse | None:
+def get_langfuse() -> Any:
     """Get the global Langfuse client instance.
 
     Returns:
@@ -126,7 +157,7 @@ def langfuse_trace(
     session_id: str | None = None,
     metadata: dict[str, Any] | None = None,
     tags: list[str] | None = None,
-) -> Generator[StatefulTraceClient | None, None, None]:
+) -> Generator[Any, None, None]:
     """Context manager for creating a Langfuse trace.
 
     Args:
@@ -164,7 +195,7 @@ def langfuse_trace(
                 _state.current_trace.reset(token)
 
 
-def get_current_trace() -> StatefulTraceClient | None:
+def get_current_trace() -> Any:
     """Get the current trace from context.
 
     Returns:
@@ -179,8 +210,8 @@ def create_llm_generation(
     input_messages: list[dict[str, Any]],
     model_parameters: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
-    trace: StatefulTraceClient | None = None,
-) -> StatefulGenerationClient | None:
+    trace: Any = None,
+) -> Any:
     """Create a new LLM generation for tracking.
 
     Args:
@@ -223,7 +254,7 @@ def create_llm_generation(
 
 
 def end_llm_generation(
-    generation: StatefulGenerationClient | None,
+    generation: Any,
     output: str | dict[str, Any] | None,
     usage: dict[str, int] | None = None,
     metadata: dict[str, Any] | None = None,
@@ -233,7 +264,7 @@ def end_llm_generation(
     """End an LLM generation with output and usage.
 
     Args:
-        generation: The generation object to update.
+        generation: The generation object to update (or None if disabled).
         output: The LLM output (text or structured).
         usage: Token usage dict with prompt_tokens, completion_tokens, total_tokens.
         metadata: Additional metadata to add.
