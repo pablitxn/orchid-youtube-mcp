@@ -22,9 +22,11 @@ RUN uv sync --frozen --no-dev --no-editable
 FROM python:3.14-slim AS runtime
 
 # Install runtime system dependencies
+# nodejs is required by yt-dlp for YouTube JS challenge resolution
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
+    nodejs \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
