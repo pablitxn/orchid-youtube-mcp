@@ -7,6 +7,6 @@ kind: Kustomization
 images:
 - name: ghcr.io/pablitxn/youtube-agent-tools
   newTag: prod
-- digest: sha256:60dd6f975798924da91b1c2c36371787ab03c21fb5db05022c645d31c957773a
+- digest: sha256:d05ed40e4b89be052b6790bee39fd933e8e0df578581971601ed7cf7874ecdc9
   name: ghcr.io/pablitxn/youtube-mcp:prod
   newName: ghcr.io/pablitxn/youtube-mcp
