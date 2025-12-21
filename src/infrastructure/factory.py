@@ -71,6 +71,7 @@ class InfrastructureFactory:
                 port=vector_settings.port,
                 grpc_port=vector_settings.grpc_port,
                 api_key=vector_settings.api_key,
+                https=vector_settings.use_ssl,
             )
         return cast("VectorDBBase", self._instances["vector_db"])
 

@@ -27,6 +27,7 @@ class QdrantVectorDB(VectorDBBase):
         api_key: str | None = None,
         url: str | None = None,
         prefer_grpc: bool = True,
+        https: bool = False,
     ) -> None:
         """Initialize Qdrant client.
 
@@ -37,6 +38,7 @@ class QdrantVectorDB(VectorDBBase):
             api_key: API key for Qdrant Cloud.
             url: Full URL (overrides host/port, for Qdrant Cloud).
             prefer_grpc: Use gRPC for operations (faster).
+            https: Use HTTPS/TLS for connection.
         """
         if url:
             self._client = AsyncQdrantClient(
@@ -51,6 +53,7 @@ class QdrantVectorDB(VectorDBBase):
                 grpc_port=grpc_port,
                 api_key=api_key,
                 prefer_grpc=prefer_grpc,
+                https=https,
             )
         self._host = host
         self._port = port
