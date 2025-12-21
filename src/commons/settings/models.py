@@ -303,6 +303,30 @@ class ProcessingSettings(BaseModel):
     retry_delay_seconds: int = 5
 
 
+class YouTubeSettings(BaseModel):
+    """YouTube downloader settings."""
+
+    cookies_file: str | None = Field(
+        default=None,
+        description="Path to cookies.txt file for authenticated downloads",
+    )
+    cookies_from_browser: (
+        Literal["chrome", "firefox", "edge", "safari", "opera", "brave", "chromium"]
+        | None
+    ) = Field(
+        default=None,
+        description="Browser to extract cookies from (e.g., 'chrome', 'firefox')",
+    )
+    proxy: str | None = Field(
+        default=None,
+        description="Proxy URL for downloads (e.g., 'http://proxy:8080')",
+    )
+    rate_limit: str | None = Field(
+        default=None,
+        description="Rate limit for downloads (e.g., '50K', '1M')",
+    )
+
+
 class LokiSettings(BaseModel):
     """Loki logging settings."""
 
@@ -380,6 +404,7 @@ class Settings(BaseSettings):
     chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
     processing: ProcessingSettings = Field(default_factory=ProcessingSettings)
     query: QuerySettings = Field(default_factory=QuerySettings)
+    youtube: YouTubeSettings = Field(default_factory=YouTubeSettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
     rate_limiting: RateLimitSettings = Field(default_factory=RateLimitSettings)
 
