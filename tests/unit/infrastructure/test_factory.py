@@ -118,6 +118,25 @@ class TestInfrastructureFactory:
             region="us-east-1",
         )
 
+    @patch("src.infrastructure.factory.MinioBlobStorage")
+    def test_get_blob_storage_from_resource_manager(
+        self,
+        mock_minio_class,
+        mock_settings,
+    ):
+        """Test blob storage is reused from ResourceManager when available."""
+        manager = MagicMock()
+        manager.has.side_effect = lambda name: name == "minio"
+        manager_blob = MagicMock()
+        manager.get.return_value = manager_blob
+
+        factory = InfrastructureFactory(mock_settings, resource_manager=manager)
+        blob = factory.get_blob_storage()
+
+        assert blob is manager_blob
+        mock_minio_class.assert_not_called()
+        manager.get.assert_called_once_with("minio")
+
     @patch("src.infrastructure.factory.QdrantVectorDB")
     def test_get_vector_db(self, mock_qdrant_class, mock_settings):
         """Test getting vector database."""
@@ -129,6 +148,25 @@ class TestInfrastructureFactory:
 
         assert vector_db is mock_instance
         mock_qdrant_class.assert_called_once()
+
+    @patch("src.infrastructure.factory.QdrantVectorDB")
+    def test_get_vector_db_from_resource_manager(
+        self,
+        mock_qdrant_class,
+        mock_settings,
+    ):
+        """Test vector db is reused from ResourceManager when available."""
+        manager = MagicMock()
+        manager.has.side_effect = lambda name: name == "qdrant"
+        manager_vector = MagicMock()
+        manager.get.return_value = manager_vector
+
+        factory = InfrastructureFactory(mock_settings, resource_manager=manager)
+        vector_db = factory.get_vector_db()
+
+        assert vector_db is manager_vector
+        mock_qdrant_class.assert_not_called()
+        manager.get.assert_called_once_with("qdrant")
 
     @patch("src.infrastructure.factory.MongoDBDocumentDB")
     def test_get_document_db_without_auth(self, mock_mongo_class, mock_settings):
@@ -160,6 +198,25 @@ class TestInfrastructureFactory:
         assert doc_db is mock_instance
         call_args = mock_mongo_class.call_args
         assert "user:pass" in call_args.kwargs["connection_string"]
+
+    @patch("src.infrastructure.factory.MongoDBDocumentDB")
+    def test_get_document_db_from_resource_manager(
+        self,
+        mock_mongo_class,
+        mock_settings,
+    ):
+        """Test document db is reused from ResourceManager when available."""
+        manager = MagicMock()
+        manager.has.side_effect = lambda name: name == "mongodb"
+        manager_doc_db = MagicMock()
+        manager.get.return_value = manager_doc_db
+
+        factory = InfrastructureFactory(mock_settings, resource_manager=manager)
+        document_db = factory.get_document_db()
+
+        assert document_db is manager_doc_db
+        mock_mongo_class.assert_not_called()
+        manager.get.assert_called_once_with("mongodb")
 
     @patch("src.infrastructure.factory.OpenAIWhisperTranscription")
     def test_get_transcription_service(self, mock_whisper_class, mock_settings):
@@ -244,6 +301,27 @@ class TestInfrastructureFactory:
         mock_service.close.assert_called_once()
         assert factory._instances == {}
 
+    async def test_close_all_skips_resource_manager_owned_instances(
+        self,
+        mock_settings,
+    ):
+        """Test manager-owned resources are not closed by the factory."""
+        factory = InfrastructureFactory(mock_settings)
+
+        manager_owned = MagicMock()
+        manager_owned.close = MagicMock()
+        local_owned = MagicMock()
+        local_owned.close = MagicMock()
+
+        factory._instances["blob_storage"] = manager_owned
+        factory._instances["other"] = local_owned
+        factory._manager_owned_instances.add("blob_storage")
+
+        await factory.close_all()
+
+        manager_owned.close.assert_not_called()
+        local_owned.close.assert_called_once()
+
 
 class TestFactorySingleton:
     """Tests for factory singleton functions."""
@@ -264,6 +342,16 @@ class TestFactorySingleton:
         factory2 = get_factory()  # No settings needed now
 
         assert factory1 is factory2
+
+    def test_get_factory_can_attach_resource_manager(self, mock_settings):
+        """Test attaching a manager to an existing factory singleton."""
+        factory = get_factory(mock_settings)
+        manager = MagicMock()
+
+        same_factory = get_factory(resource_manager=manager)
+
+        assert same_factory is factory
+        assert same_factory._resource_manager is manager
 
     def test_reset_factory(self, mock_settings):
         """Test factory reset."""

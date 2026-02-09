@@ -7,6 +7,10 @@ from fastapi import Depends
 
 from src.application.services.ingestion import VideoIngestionService
 from src.application.services.query import VideoQueryService
+from src.commons.runtime import (
+    shutdown_runtime,
+    startup_runtime,
+)
 from src.commons.settings.loader import get_settings as _load_settings
 from src.commons.settings.models import Settings
 from src.commons.telemetry import init_langfuse, shutdown_langfuse
@@ -106,8 +110,13 @@ async def init_services(settings: Settings) -> None:
     # Initialize Langfuse for LLM observability
     init_langfuse(settings.telemetry.langfuse)
 
-    # Initialize factory with settings
-    factory = get_factory(settings)
+    runtime_state = await startup_runtime(settings)
+
+    # Initialize factory with runtime-managed resources
+    factory = get_factory(
+        settings,
+        resource_manager=runtime_state.manager,
+    )
 
     # Pre-initialize critical services to fail fast
     factory.get_blob_storage()
@@ -126,4 +135,5 @@ async def shutdown_services() -> None:
         # Shutdown Langfuse and flush pending events
         shutdown_langfuse()
         reset_factory()
+        await shutdown_runtime()
         get_settings.cache_clear()
