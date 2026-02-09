@@ -8,6 +8,8 @@ from orchid_commons.blob import MultiBucketBlobRouter
 from orchid_commons.config.resources import MultiBucketSettings
 
 from src.commons.infrastructure.blob import MultiBucketBlobStorageAdapter
+from src.commons.infrastructure.documentdb import CommonsMongoDocumentDBAdapter
+from src.commons.infrastructure.vectordb import CommonsVectorStoreAdapter
 from src.infrastructure.factory import (
     InfrastructureFactory,
     get_factory,
@@ -196,7 +198,7 @@ class TestInfrastructureFactory:
         factory = InfrastructureFactory(mock_settings, resource_manager=manager)
         vector_db = factory.get_vector_db()
 
-        assert vector_db is manager_vector
+        assert isinstance(vector_db, CommonsVectorStoreAdapter)
         mock_qdrant_class.assert_not_called()
         manager.get.assert_called_once_with("qdrant")
 
@@ -246,7 +248,7 @@ class TestInfrastructureFactory:
         factory = InfrastructureFactory(mock_settings, resource_manager=manager)
         document_db = factory.get_document_db()
 
-        assert document_db is manager_doc_db
+        assert isinstance(document_db, CommonsMongoDocumentDBAdapter)
         mock_mongo_class.assert_not_called()
         manager.get.assert_called_once_with("mongodb")
 

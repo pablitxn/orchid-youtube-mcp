@@ -1,8 +1,11 @@
 """Health check endpoints."""
 
+from collections.abc import Awaitable, Callable
 from enum import Enum
+from inspect import isawaitable
+from typing import Any, cast
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response, status
 from pydantic import BaseModel, Field
 
 from src.api.dependencies import FactoryDep, SettingsDep
@@ -54,6 +57,73 @@ class ReadinessResponse(BaseModel):
     )
 
 
+async def _run_resource_health_check(resource: Any) -> tuple[bool, str | None]:
+    """Execute health check if resource exposes one."""
+    health_check = getattr(resource, "health_check", None)
+    if not callable(health_check):
+        return True, None
+
+    result = health_check()
+    if isawaitable(result):
+        result = await cast("Awaitable[Any]", result)
+
+    healthy = bool(getattr(result, "healthy", True))
+    message = getattr(result, "message", None)
+    latency_ms = getattr(result, "latency_ms", None)
+
+    parts: list[str] = []
+    if isinstance(message, str) and message:
+        parts.append(message)
+    if isinstance(latency_ms, int | float):
+        parts.append(f"{latency_ms:.1f}ms")
+
+    return healthy, ", ".join(parts) if parts else None
+
+
+async def _evaluate_component(
+    *,
+    name: str,
+    provider: str,
+    getter: Callable[[], Any],
+) -> tuple[ComponentHealth, bool]:
+    try:
+        resource = getter()
+    except Exception as exc:
+        return (
+            ComponentHealth(
+                name=name,
+                status=HealthStatus.UNHEALTHY,
+                message=str(exc),
+            ),
+            False,
+        )
+
+    try:
+        healthy, status_message = await _run_resource_health_check(resource)
+    except Exception as exc:
+        return (
+            ComponentHealth(
+                name=name,
+                status=HealthStatus.UNHEALTHY,
+                message=str(exc),
+            ),
+            False,
+        )
+
+    message = f"Provider: {provider}"
+    if status_message:
+        message = f"{message} | {status_message}"
+
+    return (
+        ComponentHealth(
+            name=name,
+            status=HealthStatus.HEALTHY if healthy else HealthStatus.UNHEALTHY,
+            message=message,
+        ),
+        healthy,
+    )
+
+
 @router.get(
     "/health",
     response_model=HealthResponse,
@@ -65,73 +135,29 @@ async def health_check(
     factory: FactoryDep,
 ) -> HealthResponse:
     """Check health of all service components."""
+    checks: dict[str, bool] = {}
     components: list[ComponentHealth] = []
-    overall_status = HealthStatus.HEALTHY
 
-    # Check blob storage
-    try:
-        factory.get_blob_storage()
-        components.append(
-            ComponentHealth(
-                name="blob_storage",
-                status=HealthStatus.HEALTHY,
-                message=f"Provider: {settings.blob_storage.provider}",
-            )
+    for component_name, provider_name, getter in [
+        ("blob_storage", settings.blob_storage.provider, factory.get_blob_storage),
+        ("vector_db", settings.vector_db.provider, factory.get_vector_db),
+        ("document_db", settings.document_db.provider, factory.get_document_db),
+    ]:
+        component_health, healthy = await _evaluate_component(
+            name=component_name,
+            provider=provider_name,
+            getter=getter,
         )
-    except Exception as e:
-        components.append(
-            ComponentHealth(
-                name="blob_storage",
-                status=HealthStatus.UNHEALTHY,
-                message=str(e),
-            )
-        )
-        overall_status = HealthStatus.DEGRADED
+        components.append(component_health)
+        checks[component_name] = healthy
 
-    # Check vector database
-    try:
-        factory.get_vector_db()
-        components.append(
-            ComponentHealth(
-                name="vector_db",
-                status=HealthStatus.HEALTHY,
-                message=f"Provider: {settings.vector_db.provider}",
-            )
-        )
-    except Exception as e:
-        components.append(
-            ComponentHealth(
-                name="vector_db",
-                status=HealthStatus.UNHEALTHY,
-                message=str(e),
-            )
-        )
-        overall_status = HealthStatus.DEGRADED
-
-    # Check document database
-    try:
-        factory.get_document_db()
-        components.append(
-            ComponentHealth(
-                name="document_db",
-                status=HealthStatus.HEALTHY,
-                message=f"Provider: {settings.document_db.provider}",
-            )
-        )
-    except Exception as e:
-        components.append(
-            ComponentHealth(
-                name="document_db",
-                status=HealthStatus.UNHEALTHY,
-                message=str(e),
-            )
-        )
-        overall_status = HealthStatus.DEGRADED
-
-    # If any critical component is unhealthy, mark overall as unhealthy
-    unhealthy_count = sum(1 for c in components if c.status == HealthStatus.UNHEALTHY)
-    if unhealthy_count >= 2:
+    healthy_count = sum(1 for value in checks.values() if value)
+    if healthy_count == len(checks):
+        overall_status = HealthStatus.HEALTHY
+    elif healthy_count == 0:
         overall_status = HealthStatus.UNHEALTHY
+    else:
+        overall_status = HealthStatus.DEGRADED
 
     return HealthResponse(
         status=overall_status,
@@ -160,6 +186,7 @@ async def liveness() -> LivenessResponse:
 )
 async def readiness(
     factory: FactoryDep,
+    response: Response,
 ) -> ReadinessResponse:
     """Check if service is ready to accept requests.
 
@@ -167,28 +194,21 @@ async def readiness(
     """
     checks: dict[str, bool] = {}
 
-    # Check blob storage connectivity
-    try:
-        factory.get_blob_storage()
-        checks["blob_storage"] = True
-    except Exception:
-        checks["blob_storage"] = False
-
-    # Check vector database connectivity
-    try:
-        factory.get_vector_db()
-        checks["vector_db"] = True
-    except Exception:
-        checks["vector_db"] = False
-
-    # Check document database connectivity
-    try:
-        factory.get_document_db()
-        checks["document_db"] = True
-    except Exception:
-        checks["document_db"] = False
+    for component_name, getter in [
+        ("blob_storage", factory.get_blob_storage),
+        ("vector_db", factory.get_vector_db),
+        ("document_db", factory.get_document_db),
+    ]:
+        try:
+            resource = getter()
+            healthy, _ = await _run_resource_health_check(resource)
+            checks[component_name] = healthy
+        except Exception:
+            checks[component_name] = False
 
     # Ready if all critical checks pass
     ready = all(checks.values())
+    if not ready:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     return ReadinessResponse(ready=ready, checks=checks)

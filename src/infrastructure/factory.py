@@ -9,8 +9,16 @@ from src.commons.infrastructure.blob import (
     BlobStorageBase,
     MultiBucketBlobStorageAdapter,
 )
-from src.commons.infrastructure.documentdb import DocumentDBBase, MongoDBDocumentDB
-from src.commons.infrastructure.vectordb import QdrantVectorDB, VectorDBBase
+from src.commons.infrastructure.documentdb import (
+    CommonsMongoDocumentDBAdapter,
+    DocumentDBBase,
+    MongoDBDocumentDB,
+)
+from src.commons.infrastructure.vectordb import (
+    CommonsVectorStoreAdapter,
+    QdrantVectorDB,
+    VectorDBBase,
+)
 from src.commons.settings.models import Settings
 from src.infrastructure.embeddings import (
     CLIPEmbeddingService,
@@ -109,7 +117,13 @@ class InfrastructureFactory:
                 self._resource_manager is not None
                 and self._resource_manager.has("qdrant")
             ):
-                self._instances["vector_db"] = self._resource_manager.get("qdrant")
+                managed_resource = self._resource_manager.get("qdrant")
+                if isinstance(managed_resource, VectorDBBase):
+                    self._instances["vector_db"] = managed_resource
+                else:
+                    self._instances["vector_db"] = CommonsVectorStoreAdapter(
+                        managed_resource
+                    )
                 self._manager_owned_instances.add("vector_db")
                 return cast("VectorDBBase", self._instances["vector_db"])
 
@@ -134,7 +148,13 @@ class InfrastructureFactory:
                 self._resource_manager is not None
                 and self._resource_manager.has("mongodb")
             ):
-                self._instances["document_db"] = self._resource_manager.get("mongodb")
+                managed_resource = self._resource_manager.get("mongodb")
+                if isinstance(managed_resource, DocumentDBBase):
+                    self._instances["document_db"] = managed_resource
+                else:
+                    self._instances["document_db"] = CommonsMongoDocumentDBAdapter(
+                        managed_resource
+                    )
                 self._manager_owned_instances.add("document_db")
                 return cast("DocumentDBBase", self._instances["document_db"])
 
