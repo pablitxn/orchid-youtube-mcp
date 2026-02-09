@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Any, cast
 
+from orchid_commons import ResourceManager
+
 from src.commons.infrastructure.blob import BlobStorageBase, MinioBlobStorage
 from src.commons.infrastructure.documentdb import DocumentDBBase, MongoDBDocumentDB
 from src.commons.infrastructure.vectordb import QdrantVectorDB, VectorDBBase
@@ -32,14 +34,25 @@ class InfrastructureFactory:
     Creates concrete implementations based on configuration settings.
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        resource_manager: ResourceManager | None = None,
+    ) -> None:
         """Initialize factory with settings.
 
         Args:
             settings: Application settings.
+            resource_manager: Optional shared resource manager for lifecycle wiring.
         """
         self._settings = settings
         self._instances: dict[str, Any] = {}
+        self._resource_manager = resource_manager
+        self._manager_owned_instances: set[str] = set()
+
+    def set_resource_manager(self, resource_manager: ResourceManager) -> None:
+        """Attach shared resource manager after factory creation."""
+        self._resource_manager = resource_manager
 
     def get_blob_storage(self) -> BlobStorageBase:
         """Get blob storage instance.
@@ -48,6 +61,14 @@ class InfrastructureFactory:
             Configured blob storage provider.
         """
         if "blob_storage" not in self._instances:
+            if (
+                self._resource_manager is not None
+                and self._resource_manager.has("minio")
+            ):
+                self._instances["blob_storage"] = self._resource_manager.get("minio")
+                self._manager_owned_instances.add("blob_storage")
+                return cast("BlobStorageBase", self._instances["blob_storage"])
+
             blob_settings = self._settings.blob_storage
             self._instances["blob_storage"] = MinioBlobStorage(
                 endpoint=blob_settings.endpoint,
@@ -65,6 +86,14 @@ class InfrastructureFactory:
             Configured vector database provider.
         """
         if "vector_db" not in self._instances:
+            if (
+                self._resource_manager is not None
+                and self._resource_manager.has("qdrant")
+            ):
+                self._instances["vector_db"] = self._resource_manager.get("qdrant")
+                self._manager_owned_instances.add("vector_db")
+                return cast("VectorDBBase", self._instances["vector_db"])
+
             vector_settings = self._settings.vector_db
             self._instances["vector_db"] = QdrantVectorDB(
                 host=vector_settings.host,
@@ -82,6 +111,14 @@ class InfrastructureFactory:
             Configured document database provider.
         """
         if "document_db" not in self._instances:
+            if (
+                self._resource_manager is not None
+                and self._resource_manager.has("mongodb")
+            ):
+                self._instances["document_db"] = self._resource_manager.get("mongodb")
+                self._manager_owned_instances.add("document_db")
+                return cast("DocumentDBBase", self._instances["document_db"])
+
             doc_settings = self._settings.document_db
             # Build connection string from settings
             if doc_settings.username and doc_settings.password:
@@ -214,7 +251,11 @@ class InfrastructureFactory:
     async def close_all(self) -> None:
         """Close all service connections."""
         # Close services that have close methods
-        for instance in self._instances.values():
+        for name, instance in self._instances.items():
+            # Runtime-managed resources are closed by ResourceManager lifecycle.
+            if name in self._manager_owned_instances:
+                continue
+
             if hasattr(instance, "close"):
                 try:
                     close_result = instance.close()
@@ -224,6 +265,7 @@ class InfrastructureFactory:
                     pass  # Ignore close errors
 
         self._instances.clear()
+        self._manager_owned_instances.clear()
 
 
 class _FactoryHolder:
@@ -232,7 +274,11 @@ class _FactoryHolder:
     instance: InfrastructureFactory | None = None
 
 
-def get_factory(settings: Settings | None = None) -> InfrastructureFactory:
+def get_factory(
+    settings: Settings | None = None,
+    *,
+    resource_manager: ResourceManager | None = None,
+) -> InfrastructureFactory:
     """Get or create the infrastructure factory singleton.
 
     Args:
@@ -247,7 +293,12 @@ def get_factory(settings: Settings | None = None) -> InfrastructureFactory:
     if _FactoryHolder.instance is None:
         if settings is None:
             raise ValueError("Settings required to initialize factory")
-        _FactoryHolder.instance = InfrastructureFactory(settings)
+        _FactoryHolder.instance = InfrastructureFactory(
+            settings,
+            resource_manager=resource_manager,
+        )
+    elif resource_manager is not None:
+        _FactoryHolder.instance.set_resource_manager(resource_manager)
 
     return _FactoryHolder.instance
 
