@@ -1,83 +1,20 @@
 """FastAPI application factory and lifespan management."""
 
-import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from orchid_commons import create_fastapi_observability_middleware
 
 from src.api.dependencies import get_settings, init_services, shutdown_services
 from src.api.middleware.error_handler import error_handler_middleware
-from src.api.middleware.logging import LoggingMiddleware
 from src.api.openapi.routes import health, ingestion, query, sources, videos
-from src.commons.telemetry import configure_logging
-
-
-def _get_formatter(log_format: str) -> logging.Formatter:
-    """Get the appropriate formatter based on format type."""
-    from src.commons.telemetry.logger import JsonFormatter, TextFormatter
-
-    if log_format == "json":
-        return JsonFormatter()
-    return TextFormatter()
-
-
-def _setup_logging() -> None:
-    """Configure logging for the application.
-
-    This must be called at module level to ensure our formatters
-    are applied before uvicorn starts.
-    """
-    settings = get_settings()
-    log_level = settings.telemetry.log_level or settings.app.log_level
-    log_format = settings.telemetry.log_format
-
-    # Configure root logger for our application
-    configure_logging(
-        level=log_level,
-        format_type=log_format,
-        logger_name="src",
-    )
-
-    # Also configure root logger as fallback
-    root_logger = logging.getLogger()
-    root_logger.setLevel(getattr(logging, log_level.upper()))
-
-
-def _configure_uvicorn_logging() -> None:
-    """Configure uvicorn loggers to use our format.
-
-    Called during lifespan when uvicorn handlers are available.
-    """
-    settings = get_settings()
-    log_level = settings.telemetry.log_level or settings.app.log_level
-    log_format = settings.telemetry.log_format
-    formatter = _get_formatter(log_format)
-
-    # Configure uvicorn loggers to use our format for consistency
-    uvicorn_loggers = ["uvicorn", "uvicorn.error", "uvicorn.access"]
-    for logger_name in uvicorn_loggers:
-        logger = logging.getLogger(logger_name)
-        logger.setLevel(getattr(logging, log_level.upper()))
-        # Replace formatter on existing handlers
-        for handler in logger.handlers:
-            handler.setFormatter(formatter)
-            handler.setLevel(getattr(logging, log_level.upper()))
-        # If no handlers yet, add one
-        if not logger.handlers:
-            import sys
-
-            handler = logging.StreamHandler(sys.stdout)
-            handler.setFormatter(formatter)
-            handler.setLevel(getattr(logging, log_level.upper()))
-            logger.addHandler(handler)
-            logger.propagate = False
-
+from src.commons.observability import bootstrap_process_logging
 
 # Configure logging at module import time
-_setup_logging()
+bootstrap_process_logging(get_settings())
 
 
 @asynccontextmanager
@@ -87,10 +24,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     Initializes all infrastructure services on startup and
     cleanly shuts them down on application exit.
     """
-    # Configure uvicorn logging now that handlers exist
-    _configure_uvicorn_logging()
-
     settings = get_settings()
+    bootstrap_process_logging(settings, configure_uvicorn_logging=True)
 
     # Initialize services
     await init_services(settings)
@@ -139,8 +74,8 @@ def _configure_middleware(app: FastAPI, settings: Any) -> None:
         allow_headers=["*"],
     )
 
-    # Logging middleware
-    app.add_middleware(LoggingMiddleware)
+    # Correlation IDs and request spans
+    app.middleware("http")(create_fastapi_observability_middleware())
 
     # Error handler (as middleware)
     app.middleware("http")(error_handler_middleware)

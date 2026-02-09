@@ -91,14 +91,15 @@ class TestDependencyLifecycle:
         from src.api.dependencies import init_services
 
         settings = MagicMock()
-        settings.telemetry.langfuse = MagicMock()
         manager = MagicMock()
         runtime_state = SimpleNamespace(manager=manager)
 
         factory = MagicMock()
 
         with (
-            patch("src.api.dependencies.init_langfuse"),
+            patch(
+                "src.api.dependencies.bootstrap_process_observability"
+            ) as bootstrap_process_observability,
             patch(
                 "src.api.dependencies.startup_runtime",
                 new=AsyncMock(return_value=runtime_state),
@@ -110,6 +111,7 @@ class TestDependencyLifecycle:
         ):
             await init_services(settings)
 
+        bootstrap_process_observability.assert_called_once_with(settings)
         get_factory.assert_called_once_with(settings, resource_manager=manager)
         factory.get_blob_storage.assert_called_once()
         factory.get_vector_db.assert_called_once()
@@ -125,7 +127,9 @@ class TestDependencyLifecycle:
                 "src.api.dependencies.get_factory",
                 side_effect=ValueError("factory not initialized"),
             ),
-            patch("src.api.dependencies.shutdown_langfuse"),
+            patch(
+                "src.api.dependencies.shutdown_process_observability"
+            ) as shutdown_obs,
             patch("src.api.dependencies.reset_factory"),
             patch(
                 "src.api.dependencies.shutdown_runtime",
@@ -135,5 +139,6 @@ class TestDependencyLifecycle:
         ):
             await dependencies.shutdown_services()
 
+        shutdown_obs.assert_called_once()
         shutdown_runtime.assert_awaited_once()
         cache_clear.assert_called_once()
