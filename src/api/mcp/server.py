@@ -12,6 +12,7 @@ from mcp.types import (
     Tool,
 )
 
+from src.api.dependencies import get_settings, init_services, shutdown_services
 from src.api.mcp.tools import (
     delete_video_tool,
     get_ingestion_status_tool,
@@ -20,7 +21,6 @@ from src.api.mcp.tools import (
     list_videos_tool,
     query_video_tool,
 )
-from src.commons.settings.loader import get_settings
 from src.commons.telemetry.logger import get_logger
 from src.infrastructure.factory import get_factory
 
@@ -257,12 +257,18 @@ def create_mcp_server() -> Server:
 
 async def run_mcp_server() -> None:
     """Run the MCP server using stdio transport."""
-    server = create_mcp_server()
-    logger.info("Starting MCP server...")
+    settings = get_settings()
+    await init_services(settings)
 
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options(),
-        )
+    try:
+        server = create_mcp_server()
+        logger.info("Starting MCP server...")
+
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(
+                read_stream,
+                write_stream,
+                server.create_initialization_options(),
+            )
+    finally:
+        await shutdown_services()

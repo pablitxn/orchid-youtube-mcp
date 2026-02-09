@@ -1,9 +1,4 @@
-"""Langfuse integration for LLM observability.
-
-This module uses true lazy imports for Langfuse to avoid the Pydantic V1
-compatibility warning on Python 3.14+. The langfuse package is only imported
-when it's actually needed (i.e., when Langfuse is enabled in settings).
-"""
+"""Langfuse compatibility wrapper backed by orchid_commons observability."""
 
 from __future__ import annotations
 
@@ -11,8 +6,16 @@ import contextlib
 import logging
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+from orchid_commons import (
+    LangfuseClient,
+    LangfuseClientSettings,
+    create_langfuse_client,
+    get_default_langfuse_client,
+    set_default_langfuse_client,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -20,134 +23,69 @@ if TYPE_CHECKING:
     from src.commons.settings.models import LangfuseSettings
 
 logger = logging.getLogger(__name__)
+_current_trace: ContextVar[Any] = ContextVar("youtube_mcp_langfuse_trace", default=None)
 
 
-@dataclass
-class _LangfuseImportState:
-    """State holder for lazy langfuse import."""
+@dataclass(slots=True)
+class _GenerationHandle:
+    """Handle for an in-flight generation context."""
 
-    module: Any = None  # Langfuse class once imported
-    import_error: str | None = None
-    attempted: bool = False
-
-
-# Singleton for import state
-_import_state = _LangfuseImportState()
-
-
-def _import_langfuse() -> tuple[Any, str | None]:
-    """Lazily import the langfuse module.
-
-    Returns:
-        Tuple of (Langfuse class or None, error message or None).
-    """
-    if _import_state.module is not None:
-        return _import_state.module, None
-
-    if _import_state.attempted:
-        return None, _import_state.import_error
-
-    _import_state.attempted = True
-
-    try:
-        from langfuse import Langfuse
-
-        _import_state.module = Langfuse
-        return Langfuse, None
-    except Exception as e:
-        _import_state.import_error = str(e)
-        return None, _import_state.import_error
-
-
-@dataclass
-class _LangfuseState:
-    """Internal state holder for Langfuse client."""
-
-    client: Any = None  # Langfuse instance, typed as Any to avoid import
-    enabled: bool = False
-    current_trace: ContextVar[Any] = field(
-        default_factory=lambda: ContextVar("current_trace", default=None)
-    )
-
-
-# Singleton state instance
-_state = _LangfuseState()
+    observation: Any
+    context_manager: contextlib.AbstractContextManager[Any]
 
 
 def init_langfuse(settings: LangfuseSettings) -> None:
-    """Initialize the global Langfuse client.
+    """Initialize default Langfuse client from legacy youtube-mcp settings."""
+    client_settings = LangfuseClientSettings(
+        enabled=settings.enabled,
+        public_key=settings.public_key or None,
+        secret_key=settings.secret_key or None,
+        base_url=settings.host,
+        timeout_seconds=5,
+        flush_at=settings.flush_at,
+        flush_interval_seconds=settings.flush_interval,
+        sample_rate=settings.sample_rate,
+        debug=settings.debug,
+    )
 
-    Args:
-        settings: Langfuse configuration settings.
-    """
-    if not settings.enabled:
-        logger.info("Langfuse is disabled")
-        _state.enabled = False
-        return
+    client = create_langfuse_client(
+        settings=client_settings,
+        register_as_default=True,
+    )
 
-    # Only import langfuse when it's actually needed
-    langfuse_class, import_error = _import_langfuse()
-
-    if langfuse_class is None:
-        logger.warning(
-            "Langfuse not available (import failed), tracing disabled",
-            extra={"error": import_error},
+    if client.enabled:
+        logger.info("Langfuse initialized", extra={"host": client.settings.base_url})
+    else:
+        logger.info(
+            "Langfuse disabled",
+            extra={"reason": client.disabled_reason},
         )
-        _state.enabled = False
-        return
-
-    if not settings.public_key or not settings.secret_key:
-        logger.warning("Langfuse keys not configured, tracing disabled")
-        _state.enabled = False
-        return
-
-    try:
-        _state.client = langfuse_class(
-            public_key=settings.public_key,
-            secret_key=settings.secret_key,
-            host=settings.host,
-            debug=settings.debug,
-            sample_rate=settings.sample_rate,
-            flush_at=settings.flush_at,
-            flush_interval=settings.flush_interval,
-        )
-        _state.enabled = True
-        logger.info("Langfuse initialized successfully", extra={"host": settings.host})
-    except Exception as e:
-        logger.error("Failed to initialize Langfuse", extra={"error": str(e)})
-        _state.enabled = False
 
 
 def shutdown_langfuse() -> None:
-    """Shutdown and flush the Langfuse client."""
-    if _state.client is not None:
-        try:
-            _state.client.flush()
-            _state.client.shutdown()
-            logger.info("Langfuse shutdown successfully")
-        except Exception as e:
-            logger.error("Error shutting down Langfuse", extra={"error": str(e)})
-        finally:
-            _state.client = None
-            _state.enabled = False
+    """Shutdown and clear the default Langfuse client."""
+    client = get_default_langfuse_client()
+    if client is None:
+        return
+
+    try:
+        client.flush()
+        client.shutdown()
+    except Exception as e:
+        logger.error("Error shutting down Langfuse", extra={"error": str(e)})
+    finally:
+        set_default_langfuse_client(None)
 
 
-def get_langfuse() -> Any:
-    """Get the global Langfuse client instance.
-
-    Returns:
-        The Langfuse client or None if not initialized.
-    """
-    return _state.client
+def get_langfuse() -> LangfuseClient | None:
+    """Get the process-wide Langfuse client instance."""
+    return get_default_langfuse_client()
 
 
 def is_langfuse_enabled() -> bool:
-    """Check if Langfuse tracing is enabled.
-
-    Returns:
-        True if Langfuse is enabled and initialized.
-    """
-    return _state.enabled
+    """Check if Langfuse tracing is enabled."""
+    client = get_default_langfuse_client()
+    return bool(client is not None and client.enabled)
 
 
 @contextmanager
@@ -158,50 +96,38 @@ def langfuse_trace(
     metadata: dict[str, Any] | None = None,
     tags: list[str] | None = None,
 ) -> Generator[Any, None, None]:
-    """Context manager for creating a Langfuse trace.
-
-    Args:
-        name: Name of the trace.
-        user_id: Optional user identifier.
-        session_id: Optional session identifier.
-        metadata: Optional metadata dictionary.
-        tags: Optional list of tags.
-
-    Yields:
-        The trace object or None if Langfuse is not enabled.
-    """
-    if not _state.enabled or _state.client is None:
+    """Context manager for creating a Langfuse trace-like span."""
+    client = _get_enabled_client()
+    if client is None:
         yield None
         return
 
+    span_metadata: dict[str, Any] = dict(metadata or {})
+    if user_id is not None:
+        span_metadata.setdefault("user_id", user_id)
+    if session_id is not None:
+        span_metadata.setdefault("session_id", session_id)
+    if tags is not None:
+        span_metadata.setdefault("tags", tags)
+
     token = None
     try:
-        trace = _state.client.trace(
-            name=name,
-            user_id=user_id,
-            session_id=session_id,
-            metadata=metadata or {},
-            tags=tags or [],
-        )
-        token = _state.current_trace.set(trace)
-        yield trace
+        with client.start_span(name=name, metadata=span_metadata or None) as span:
+            token = _current_trace.set(span)
+            yield span
     except Exception as e:
         logger.error("Error creating Langfuse trace", extra={"error": str(e)})
         yield None
     finally:
-        _state.current_trace.set(None)
+        _current_trace.set(None)
         if token is not None:
             with contextlib.suppress(ValueError):
-                _state.current_trace.reset(token)
+                _current_trace.reset(token)
 
 
 def get_current_trace() -> Any:
-    """Get the current trace from context.
-
-    Returns:
-        The current trace or None.
-    """
-    return _state.current_trace.get()
+    """Get the current trace/span from context."""
+    return _current_trace.get()
 
 
 def create_llm_generation(
@@ -212,41 +138,26 @@ def create_llm_generation(
     metadata: dict[str, Any] | None = None,
     trace: Any = None,
 ) -> Any:
-    """Create a new LLM generation for tracking.
-
-    Args:
-        name: Name of the generation (e.g., "chat_completion").
-        model: Model identifier.
-        input_messages: Input messages sent to the LLM.
-        model_parameters: Model parameters (temperature, max_tokens, etc.).
-        metadata: Additional metadata.
-        trace: Optional trace to attach to. Uses current trace if not provided.
-
-    Returns:
-        The generation object for updating with output, or None if disabled.
-    """
-    if not _state.enabled or _state.client is None:
+    """Create a generation observation compatible with legacy callers."""
+    client = _get_enabled_client()
+    if client is None:
         return None
 
-    parent = trace or _state.current_trace.get()
+    trace_id = _extract_trace_id(trace)
 
     try:
-        if parent is not None:
-            return parent.generation(
-                name=name,
-                model=model,
-                input=input_messages,
-                model_parameters=model_parameters or {},
-                metadata=metadata or {},
-            )
-        # Create standalone generation with new trace
-        new_trace = _state.client.trace(name=f"standalone_{name}")
-        return new_trace.generation(
+        context_manager = client.start_generation(
             name=name,
             model=model,
             input=input_messages,
-            model_parameters=model_parameters or {},
-            metadata=metadata or {},
+            metadata=metadata,
+            model_parameters=model_parameters,
+            trace_id=trace_id,
+        )
+        observation = context_manager.__enter__()
+        return _GenerationHandle(
+            observation=observation,
+            context_manager=context_manager,
         )
     except Exception as e:
         logger.error("Error creating LLM generation", extra={"error": str(e)})
@@ -261,35 +172,90 @@ def end_llm_generation(
     level: str = "DEFAULT",
     status_message: str | None = None,
 ) -> None:
-    """End an LLM generation with output and usage.
-
-    Args:
-        generation: The generation object to update (or None if disabled).
-        output: The LLM output (text or structured).
-        usage: Token usage dict with prompt_tokens, completion_tokens, total_tokens.
-        metadata: Additional metadata to add.
-        level: Log level (DEFAULT, DEBUG, WARNING, ERROR).
-        status_message: Optional status message.
-    """
+    """Finalize a generation observation."""
     if generation is None:
         return
 
-    try:
-        generation.end(
-            output=output,
-            usage=usage,
-            metadata=metadata,
-            level=level,
-            status_message=status_message,
-        )
-    except Exception as e:
-        logger.error("Error ending LLM generation", extra={"error": str(e)})
+    if isinstance(generation, _GenerationHandle):
+        try:
+            _safe_observation_update(
+                generation.observation,
+                output=output,
+                usage_details=usage,
+                metadata=metadata,
+                level=level,
+                status_message=status_message,
+            )
+        finally:
+            _close_generation(generation.context_manager)
+        return
+
+    # Backward compatibility with direct SDK generation objects.
+    end = getattr(generation, "end", None)
+    if callable(end):
+        try:
+            end(
+                output=output,
+                usage=usage,
+                metadata=metadata,
+                level=level,
+                status_message=status_message,
+            )
+        except Exception as e:
+            logger.error("Error ending LLM generation", extra={"error": str(e)})
 
 
 def flush_langfuse() -> None:
-    """Flush any pending Langfuse events."""
-    if _state.client is not None:
-        try:
-            _state.client.flush()
-        except Exception as e:
-            logger.error("Error flushing Langfuse", extra={"error": str(e)})
+    """Flush pending Langfuse events."""
+    client = get_default_langfuse_client()
+    if client is None:
+        return
+
+    try:
+        client.flush()
+    except Exception as e:
+        logger.error("Error flushing Langfuse", extra={"error": str(e)})
+
+
+def _get_enabled_client() -> LangfuseClient | None:
+    client = get_default_langfuse_client()
+    if client is None or not client.enabled:
+        return None
+    return client
+
+
+def _extract_trace_id(trace: Any) -> str | None:
+    if trace is None:
+        return None
+
+    for attr in ("trace_id", "id"):
+        value = getattr(trace, attr, None)
+        if value:
+            return str(value)
+
+    if isinstance(trace, dict):
+        value = trace.get("trace_id") or trace.get("id")
+        if value:
+            return str(value)
+
+    return None
+
+
+def _safe_observation_update(observation: Any, **kwargs: Any) -> None:
+    update = getattr(observation, "update", None)
+    if update is None or not callable(update):
+        return
+
+    payload = {key: value for key, value in kwargs.items() if value is not None}
+    if not payload:
+        return
+
+    try:
+        update(**payload)
+    except Exception:
+        return
+
+
+def _close_generation(context_manager: contextlib.AbstractContextManager[Any]) -> None:
+    with contextlib.suppress(Exception):
+        context_manager.__exit__(None, None, None)
