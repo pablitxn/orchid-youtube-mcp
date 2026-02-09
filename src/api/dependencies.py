@@ -104,14 +104,22 @@ IngestionServiceDep = Annotated[VideoIngestionService, Depends(get_ingestion_ser
 QueryServiceDep = Annotated[VideoQueryService, Depends(get_query_service)]
 
 
-async def init_services(settings: Settings) -> None:
+async def init_services(
+    settings: Settings,
+    *,
+    configure_uvicorn_logging: bool = False,
+) -> None:
     """Initialize all infrastructure services on startup.
 
     Args:
         settings: Application settings.
+        configure_uvicorn_logging: Configure uvicorn loggers in addition to root logger.
     """
     runtime_state = await startup_runtime(settings)
-    bootstrap_process_observability(settings)
+    bootstrap_process_observability(
+        settings,
+        configure_uvicorn_logging=configure_uvicorn_logging,
+    )
 
     # Initialize factory with runtime-managed resources
     factory = get_factory(

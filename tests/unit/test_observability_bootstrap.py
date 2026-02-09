@@ -79,6 +79,45 @@ class TestBootstrapProcessObservability:
         # One call for root logger + one per uvicorn logger
         assert bootstrap_logging.call_count == 4
 
+    def test_bootstrap_observability_with_uvicorn_logging_is_idempotent(self) -> None:
+        settings = MagicMock()
+        settings.app.environment = "dev"
+
+        shared_settings = MagicMock()
+        langfuse_client = MagicMock()
+
+        with (
+            patch(
+                "src.commons.runtime.load_shared_app_settings",
+                return_value=shared_settings,
+            ),
+            patch(
+                "src.commons.observability.bootstrap_logging_from_app_settings"
+            ) as bootstrap_logging,
+            patch(
+                "src.commons.observability.bootstrap_observability"
+            ) as bootstrap_otel,
+            patch(
+                "src.commons.observability.create_langfuse_client",
+                return_value=langfuse_client,
+            ) as create_client,
+        ):
+            observability.bootstrap_process_observability(
+                settings,
+                configure_uvicorn_logging=True,
+            )
+            observability.bootstrap_process_observability(
+                settings,
+                configure_uvicorn_logging=True,
+            )
+
+        assert bootstrap_logging.call_count == 4
+        bootstrap_otel.assert_called_once_with(shared_settings, environment="dev")
+        create_client.assert_called_once_with(
+            app_settings=shared_settings,
+            register_as_default=True,
+        )
+
 
 class TestShutdownProcessObservability:
     """Tests for observability shutdown."""

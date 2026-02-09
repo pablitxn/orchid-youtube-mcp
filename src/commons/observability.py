@@ -77,9 +77,16 @@ def bootstrap_process_logging(
         return state
 
 
-def bootstrap_process_observability(settings: Settings) -> ObservabilityRuntimeState:
+def bootstrap_process_observability(
+    settings: Settings,
+    *,
+    configure_uvicorn_logging: bool = False,
+) -> ObservabilityRuntimeState:
     """Bootstrap OpenTelemetry + Langfuse once per process."""
-    bootstrap_process_logging(settings)
+    bootstrap_process_logging(
+        settings,
+        configure_uvicorn_logging=configure_uvicorn_logging,
+    )
 
     with _StateHolder.lock:
         # Re-resolve state because bootstrap_process_logging releases the lock.
