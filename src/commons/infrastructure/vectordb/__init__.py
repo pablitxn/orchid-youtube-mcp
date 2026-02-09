@@ -5,6 +5,9 @@ from src.commons.infrastructure.vectordb.base import (
     VectorDBBase,
     VectorPoint,
 )
+from src.commons.infrastructure.vectordb.commons_adapter import (
+    CommonsVectorStoreAdapter,
+)
 from src.commons.infrastructure.vectordb.qdrant_provider import QdrantVectorDB
 
 __all__ = [
@@ -12,6 +15,8 @@ __all__ = [
     "SearchResult",
     "VectorDBBase",
     "VectorPoint",
+    # Adapters
+    "CommonsVectorStoreAdapter",
     # Implementations
     "QdrantVectorDB",
 ]

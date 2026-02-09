@@ -6,25 +6,16 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
 
 from orchid_commons import (
     ResourceManager,
     ResourceSettings,
     load_config,
-    register_factory,
 )
 from orchid_commons.blob import register_multi_bucket_factory
 
-from src.commons.infrastructure.documentdb import DocumentDBBase, MongoDBDocumentDB
-from src.commons.infrastructure.vectordb import QdrantVectorDB, VectorDBBase
-
 if TYPE_CHECKING:
     from orchid_commons.config.models import AppSettings
-    from orchid_commons.config.resources import (
-        MongoDbSettings,
-        QdrantSettings,
-    )
 
     from src.commons.settings.models import Settings
 
@@ -34,40 +25,6 @@ REQUIRED_RESOURCES = ("multi_bucket", "qdrant", "mongodb")
 _FACTORIES_REGISTERED = False
 
 
-def _resolve_qdrant_target(settings: QdrantSettings) -> tuple[str, int, bool]:
-    if settings.host:
-        return settings.host, settings.port, settings.use_ssl
-
-    if settings.url is None:
-        raise ValueError("Qdrant resource requires host or url")
-
-    parsed = urlparse(settings.url)
-    if parsed.hostname is None:
-        raise ValueError(f"Invalid Qdrant URL: {settings.url}")
-
-    use_ssl = settings.use_ssl or parsed.scheme == "https"
-    default_port = 443 if use_ssl else 80
-    return parsed.hostname, parsed.port or default_port, use_ssl
-
-
-async def _create_qdrant_resource(settings: QdrantSettings) -> VectorDBBase:
-    host, port, use_ssl = _resolve_qdrant_target(settings)
-    return QdrantVectorDB(
-        host=host,
-        port=port,
-        grpc_port=settings.grpc_port,
-        api_key=settings.api_key,
-        https=use_ssl,
-    )
-
-
-async def _create_mongodb_resource(settings: MongoDbSettings) -> DocumentDBBase:
-    return MongoDBDocumentDB(
-        connection_string=settings.uri,
-        database_name=settings.database,
-    )
-
-
 def register_runtime_factories() -> None:
     """Register youtube-mcp resource factories once."""
     global _FACTORIES_REGISTERED  # noqa: PLW0603
@@ -75,9 +32,9 @@ def register_runtime_factories() -> None:
     if _FACTORIES_REGISTERED:
         return
 
+    # Keep explicit registration for multi-bucket alias used by the app.
+    # Qdrant/MongoDB factories are provided by orchid_commons built-ins.
     register_multi_bucket_factory("multi_bucket")
-    register_factory("qdrant", "qdrant", _create_qdrant_resource)
-    register_factory("mongodb", "mongodb", _create_mongodb_resource)
 
     _FACTORIES_REGISTERED = True
 
