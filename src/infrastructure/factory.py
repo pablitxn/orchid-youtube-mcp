@@ -1,11 +1,14 @@
 """Infrastructure factory for creating service instances from configuration."""
 
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from orchid_commons import ResourceManager
 
-from src.commons.infrastructure.blob import BlobStorageBase, MinioBlobStorage
+from src.commons.infrastructure.blob import (
+    BlobStorageBase,
+    MultiBucketBlobStorageAdapter,
+)
 from src.commons.infrastructure.documentdb import DocumentDBBase, MongoDBDocumentDB
 from src.commons.infrastructure.vectordb import QdrantVectorDB, VectorDBBase
 from src.commons.settings.models import Settings
@@ -26,6 +29,9 @@ from src.infrastructure.video import (
     VideoChunkerBase,
 )
 from src.infrastructure.youtube import YouTubeDownloaderBase, YtDlpDownloader
+
+if TYPE_CHECKING:
+    from orchid_commons.blob import MultiBucketBlobRouter
 
 
 class InfrastructureFactory:
@@ -63,19 +69,32 @@ class InfrastructureFactory:
         if "blob_storage" not in self._instances:
             if (
                 self._resource_manager is not None
-                and self._resource_manager.has("minio")
+                and self._resource_manager.has("multi_bucket")
             ):
-                self._instances["blob_storage"] = self._resource_manager.get("minio")
+                managed_resource = self._resource_manager.get("multi_bucket")
+                if isinstance(managed_resource, MultiBucketBlobStorageAdapter):
+                    self._instances["blob_storage"] = managed_resource
+                else:
+                    self._instances["blob_storage"] = MultiBucketBlobStorageAdapter(
+                        router=cast("MultiBucketBlobRouter", managed_resource)
+                    )
                 self._manager_owned_instances.add("blob_storage")
                 return cast("BlobStorageBase", self._instances["blob_storage"])
 
             blob_settings = self._settings.blob_storage
-            self._instances["blob_storage"] = MinioBlobStorage(
-                endpoint=blob_settings.endpoint,
-                access_key=blob_settings.access_key,
-                secret_key=blob_settings.secret_key,
-                secure=blob_settings.use_ssl,
-                region=blob_settings.region,
+            self._instances["blob_storage"] = (
+                MultiBucketBlobStorageAdapter.from_settings(
+                    endpoint=blob_settings.endpoint,
+                    access_key=blob_settings.access_key,
+                    secret_key=blob_settings.secret_key,
+                    secure=blob_settings.use_ssl,
+                    region=blob_settings.region,
+                    buckets={
+                        "videos": blob_settings.buckets.videos,
+                        "chunks": blob_settings.buckets.chunks,
+                        "frames": blob_settings.buckets.frames,
+                    },
+                )
             )
         return cast("BlobStorageBase", self._instances["blob_storage"])
 

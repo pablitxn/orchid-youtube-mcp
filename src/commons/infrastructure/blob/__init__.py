@@ -1,13 +1,14 @@
 """Blob storage abstractions and implementations."""
 
+from orchid_commons.blob import BlobNotFoundError
+
 from src.commons.infrastructure.blob.base import (
     BlobMetadata,
     BlobStorageBase,
     HealthStatus,
 )
-from src.commons.infrastructure.blob.minio_provider import (
-    BlobNotFoundError,
-    MinioBlobStorage,
+from src.commons.infrastructure.blob.multi_bucket_adapter import (
+    MultiBucketBlobStorageAdapter,
 )
 
 __all__ = [
@@ -16,7 +17,7 @@ __all__ = [
     "BlobStorageBase",
     "HealthStatus",
     # Implementations
-    "MinioBlobStorage",
+    "MultiBucketBlobStorageAdapter",
     # Exceptions
     "BlobNotFoundError",
 ]
