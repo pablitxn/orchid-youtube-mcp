@@ -3,7 +3,10 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from orchid_commons.blob import MultiBucketBlobRouter
+from orchid_commons.config.resources import MultiBucketSettings
 
+from src.commons.infrastructure.blob import MultiBucketBlobStorageAdapter
 from src.infrastructure.factory import (
     InfrastructureFactory,
     get_factory,
@@ -30,6 +33,9 @@ def mock_settings():
     settings.blob_storage.secret_key = "minioadmin"
     settings.blob_storage.use_ssl = False
     settings.blob_storage.region = "us-east-1"
+    settings.blob_storage.buckets.videos = "rag-videos"
+    settings.blob_storage.buckets.chunks = "rag-chunks"
+    settings.blob_storage.buckets.frames = "rag-frames"
 
     # Vector DB settings
     settings.vector_db.host = "localhost"
@@ -100,42 +106,63 @@ class TestInfrastructureFactory:
         assert chunker is not None
         assert factory.get_video_chunker() is chunker
 
-    @patch("src.infrastructure.factory.MinioBlobStorage")
-    def test_get_blob_storage(self, mock_minio_class, mock_settings):
+    @patch("src.infrastructure.factory.MultiBucketBlobStorageAdapter.from_settings")
+    def test_get_blob_storage(self, mock_from_settings, mock_settings):
         """Test getting blob storage."""
         mock_instance = MagicMock()
-        mock_minio_class.return_value = mock_instance
+        mock_from_settings.return_value = mock_instance
 
         factory = InfrastructureFactory(mock_settings)
         blob = factory.get_blob_storage()
 
         assert blob is mock_instance
-        mock_minio_class.assert_called_once_with(
+        mock_from_settings.assert_called_once_with(
             endpoint="localhost:9000",
             access_key="minioadmin",
             secret_key="minioadmin",
             secure=False,
             region="us-east-1",
+            buckets={
+                "videos": "rag-videos",
+                "chunks": "rag-chunks",
+                "frames": "rag-frames",
+            },
         )
 
-    @patch("src.infrastructure.factory.MinioBlobStorage")
-    def test_get_blob_storage_from_resource_manager(
-        self,
-        mock_minio_class,
-        mock_settings,
-    ):
+    def test_get_blob_storage_from_resource_manager(self, mock_settings):
         """Test blob storage is reused from ResourceManager when available."""
+        client = MagicMock()
+        client.put_object = MagicMock()
+        client.get_object = MagicMock()
+        client.stat_object = MagicMock()
+        client.remove_object = MagicMock()
+        client.presigned_get_object = MagicMock()
+        client.presigned_put_object = MagicMock()
+        client.bucket_exists = MagicMock(return_value=True)
+
+        router = MultiBucketBlobRouter(
+            client=client,
+            settings=MultiBucketSettings(
+                endpoint="localhost:9000",
+                access_key="minioadmin",
+                secret_key="minioadmin",
+                buckets={
+                    "videos": "rag-videos",
+                    "chunks": "rag-chunks",
+                    "frames": "rag-frames",
+                },
+            ),
+        )
+
         manager = MagicMock()
-        manager.has.side_effect = lambda name: name == "minio"
-        manager_blob = MagicMock()
-        manager.get.return_value = manager_blob
+        manager.has.side_effect = lambda name: name == "multi_bucket"
+        manager.get.return_value = router
 
         factory = InfrastructureFactory(mock_settings, resource_manager=manager)
         blob = factory.get_blob_storage()
 
-        assert blob is manager_blob
-        mock_minio_class.assert_not_called()
-        manager.get.assert_called_once_with("minio")
+        assert isinstance(blob, MultiBucketBlobStorageAdapter)
+        manager.get.assert_called_once_with("multi_bucket")
 
     @patch("src.infrastructure.factory.QdrantVectorDB")
     def test_get_vector_db(self, mock_qdrant_class, mock_settings):

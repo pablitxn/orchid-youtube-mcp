@@ -14,15 +14,14 @@ from orchid_commons import (
     load_config,
     register_factory,
 )
+from orchid_commons.blob import register_multi_bucket_factory
 
-from src.commons.infrastructure.blob import BlobStorageBase, MinioBlobStorage
 from src.commons.infrastructure.documentdb import DocumentDBBase, MongoDBDocumentDB
 from src.commons.infrastructure.vectordb import QdrantVectorDB, VectorDBBase
 
 if TYPE_CHECKING:
     from orchid_commons.config.models import AppSettings
     from orchid_commons.config.resources import (
-        MinioSettings,
         MongoDbSettings,
         QdrantSettings,
     )
@@ -30,7 +29,7 @@ if TYPE_CHECKING:
     from src.commons.settings.models import Settings
 
 CONFIG_DIR = Path("config")
-REQUIRED_RESOURCES = ("minio", "qdrant", "mongodb")
+REQUIRED_RESOURCES = ("multi_bucket", "qdrant", "mongodb")
 
 _FACTORIES_REGISTERED = False
 
@@ -49,16 +48,6 @@ def _resolve_qdrant_target(settings: QdrantSettings) -> tuple[str, int, bool]:
     use_ssl = settings.use_ssl or parsed.scheme == "https"
     default_port = 443 if use_ssl else 80
     return parsed.hostname, parsed.port or default_port, use_ssl
-
-
-async def _create_minio_resource(settings: MinioSettings) -> BlobStorageBase:
-    return MinioBlobStorage(
-        endpoint=settings.endpoint,
-        access_key=settings.access_key,
-        secret_key=settings.secret_key,
-        secure=settings.secure,
-        region=settings.region,
-    )
 
 
 async def _create_qdrant_resource(settings: QdrantSettings) -> VectorDBBase:
@@ -86,7 +75,7 @@ def register_runtime_factories() -> None:
     if _FACTORIES_REGISTERED:
         return
 
-    register_factory("minio", "minio", _create_minio_resource)
+    register_multi_bucket_factory("multi_bucket")
     register_factory("qdrant", "qdrant", _create_qdrant_resource)
     register_factory("mongodb", "mongodb", _create_mongodb_resource)
 
