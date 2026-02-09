@@ -111,11 +111,44 @@ class TestDependencyLifecycle:
         ):
             await init_services(settings)
 
-        bootstrap_process_observability.assert_called_once_with(settings)
+        bootstrap_process_observability.assert_called_once_with(
+            settings,
+            configure_uvicorn_logging=False,
+        )
         get_factory.assert_called_once_with(settings, resource_manager=manager)
         factory.get_blob_storage.assert_called_once()
         factory.get_vector_db.assert_called_once()
         factory.get_document_db.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_init_services_can_configure_uvicorn_logging(self):
+        """init_services should pass uvicorn logging flag to observability bootstrap."""
+        from src.api.dependencies import init_services
+
+        settings = MagicMock()
+        manager = MagicMock()
+        runtime_state = SimpleNamespace(manager=manager)
+        factory = MagicMock()
+
+        with (
+            patch(
+                "src.api.dependencies.bootstrap_process_observability"
+            ) as bootstrap_process_observability,
+            patch(
+                "src.api.dependencies.startup_runtime",
+                new=AsyncMock(return_value=runtime_state),
+            ),
+            patch(
+                "src.api.dependencies.get_factory",
+                return_value=factory,
+            ),
+        ):
+            await init_services(settings, configure_uvicorn_logging=True)
+
+        bootstrap_process_observability.assert_called_once_with(
+            settings,
+            configure_uvicorn_logging=True,
+        )
 
     @pytest.mark.asyncio
     async def test_shutdown_services_always_cleans_runtime_state(self):

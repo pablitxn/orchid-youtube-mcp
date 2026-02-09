@@ -11,10 +11,6 @@ from orchid_commons import create_fastapi_observability_middleware
 from src.api.dependencies import get_settings, init_services, shutdown_services
 from src.api.middleware.error_handler import error_handler_middleware
 from src.api.openapi.routes import health, ingestion, query, sources, videos
-from src.commons.observability import bootstrap_process_logging
-
-# Configure logging at module import time
-bootstrap_process_logging(get_settings())
 
 
 @asynccontextmanager
@@ -25,10 +21,9 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     cleanly shuts them down on application exit.
     """
     settings = get_settings()
-    bootstrap_process_logging(settings, configure_uvicorn_logging=True)
 
     # Initialize services
-    await init_services(settings)
+    await init_services(settings, configure_uvicorn_logging=True)
 
     yield
 
