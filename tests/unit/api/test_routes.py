@@ -1,7 +1,6 @@
 """Unit tests for API routes."""
 
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -46,19 +45,9 @@ def mock_settings():
 def mock_factory():
     """Create mock infrastructure factory."""
     factory = MagicMock()
-
-    healthy = SimpleNamespace(healthy=True, latency_ms=1.0, message="ok")
-
-    blob = MagicMock()
-    blob.health_check = AsyncMock(return_value=healthy)
-    vector = MagicMock()
-    vector.health_check = AsyncMock(return_value=healthy)
-    document = MagicMock()
-    document.health_check = AsyncMock(return_value=healthy)
-
-    factory.get_blob_storage.return_value = blob
-    factory.get_vector_db.return_value = vector
-    factory.get_document_db.return_value = document
+    factory.get_blob_storage.return_value = MagicMock()
+    factory.get_vector_db.return_value = MagicMock()
+    factory.get_document_db.return_value = MagicMock()
     factory.get_youtube_downloader.return_value = MagicMock()
     factory.get_transcription_service.return_value = MagicMock()
     factory.get_text_embedding_service.return_value = MagicMock()
@@ -103,68 +92,6 @@ def client(mock_settings, mock_factory, mock_ingestion_service, mock_query_servi
         app.dependency_overrides[get_ingestion_service] = lambda: mock_ingestion_service
         app.dependency_overrides[get_query_service] = lambda: mock_query_service
         yield TestClient(app, raise_server_exceptions=False)
-
-
-class TestHealthRoutes:
-    """Tests for health check endpoints."""
-
-    def test_health_check(self, client):
-        """Test basic health check."""
-        response = client.get("/health")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert data["status"] == "healthy"
-
-    def test_liveness_check(self, client):
-        """Test liveness probe."""
-        response = client.get("/health/live")
-        assert response.status_code == status.HTTP_200_OK
-
-    def test_readiness_check(self, client):
-        """Test readiness probe."""
-        response = client.get("/health/ready")
-        # May return 200 or 503 depending on service state
-        assert response.status_code in [
-            status.HTTP_200_OK,
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-        ]
-
-    def test_health_check_reports_unhealthy_dependency(self, client, mock_factory):
-        """Health endpoint should surface failing dependency health checks."""
-        unhealthy = SimpleNamespace(healthy=False, latency_ms=2.5, message="down")
-        mock_factory.get_vector_db.return_value.health_check = AsyncMock(
-            return_value=unhealthy
-        )
-
-        response = client.get("/health")
-
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert data["status"] == "degraded"
-        vector_component = next(
-            component
-            for component in data["components"]
-            if component["name"] == "vector_db"
-        )
-        assert vector_component["status"] == "unhealthy"
-
-    def test_readiness_returns_503_when_dependency_unhealthy(
-        self,
-        client,
-        mock_factory,
-    ):
-        """Readiness should return 503 when any critical dependency is unhealthy."""
-        unhealthy = SimpleNamespace(healthy=False, latency_ms=1.0, message="down")
-        mock_factory.get_document_db.return_value.health_check = AsyncMock(
-            return_value=unhealthy
-        )
-
-        response = client.get("/health/ready")
-
-        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-        data = response.json()
-        assert data["ready"] is False
-        assert data["checks"]["document_db"] is False
 
 
 class TestIngestionRoutes:

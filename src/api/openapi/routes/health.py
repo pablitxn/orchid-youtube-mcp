@@ -1,44 +1,36 @@
-"""Health check endpoints."""
+"""Health and readiness endpoints backed by runtime ResourceManager checks."""
 
-from collections.abc import Awaitable, Callable
-from enum import Enum
-from inspect import isawaitable
-from typing import Any, cast
+from __future__ import annotations
 
-from fastapi import APIRouter, Response, status
+from typing import Any, Literal, cast
+
+from fastapi import APIRouter, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from src.api.dependencies import FactoryDep, SettingsDep
+from src.commons.runtime import get_runtime_manager
 
 router = APIRouter()
 
 
-class HealthStatus(str, Enum):
-    """Health check status."""
+class HealthCheckStatus(BaseModel):
+    """Per-check payload produced by commons health report."""
 
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    UNHEALTHY = "unhealthy"
-
-
-class ComponentHealth(BaseModel):
-    """Health status of a single component."""
-
-    name: str = Field(description="Component name")
-    status: HealthStatus = Field(description="Component health status")
-    message: str | None = Field(default=None, description="Additional details")
-
-
-class HealthResponse(BaseModel):
-    """Health check response."""
-
-    status: HealthStatus = Field(description="Overall health status")
-    version: str = Field(description="Application version")
-    environment: str = Field(description="Deployment environment")
-    components: list[ComponentHealth] = Field(
-        default_factory=list,
-        description="Individual component health",
+    healthy: bool = Field(description="Whether the dependency is healthy")
+    latency_ms: float = Field(description="Latency for this health check")
+    message: str | None = Field(default=None, description="Optional check message")
+    details: dict[str, str] | None = Field(
+        default=None,
+        description="Optional details such as provider or error_type",
     )
+
+
+class HealthSummary(BaseModel):
+    """Aggregated counters for health checks."""
+
+    total: int = Field(description="Total number of checks")
+    healthy: int = Field(description="Count of healthy checks")
+    unhealthy: int = Field(description="Count of unhealthy checks")
 
 
 class LivenessResponse(BaseModel):
@@ -47,124 +39,85 @@ class LivenessResponse(BaseModel):
     status: str = Field(default="ok")
 
 
-class ReadinessResponse(BaseModel):
-    """Readiness check response."""
+class RuntimeHealthPayload(BaseModel):
+    """Runtime health payload aligned with orchid_commons.HealthReport.to_dict()."""
 
-    ready: bool = Field(description="Whether the service is ready to accept requests")
-    checks: dict[str, bool] = Field(
+    status: Literal["ok", "degraded", "down"] = Field(
+        description="Aggregated status across all runtime checks"
+    )
+    healthy: bool = Field(description="Legacy alias for readiness")
+    readiness: bool = Field(description="Whether required checks are ready")
+    liveness: bool = Field(description="Whether process is alive")
+    latency_ms: float = Field(description="Total health check execution latency")
+    summary: HealthSummary = Field(description="Aggregated check counts")
+    checks: dict[str, HealthCheckStatus] = Field(
         default_factory=dict,
-        description="Individual readiness checks",
+        description="Per-resource check payloads",
     )
 
 
-async def _run_resource_health_check(resource: Any) -> tuple[bool, str | None]:
-    """Execute health check if resource exposes one."""
-    health_check = getattr(resource, "health_check", None)
-    if not callable(health_check):
-        return True, None
-
-    result = health_check()
-    if isawaitable(result):
-        result = await cast("Awaitable[Any]", result)
-
-    healthy = bool(getattr(result, "healthy", True))
-    message = getattr(result, "message", None)
-    latency_ms = getattr(result, "latency_ms", None)
-
-    parts: list[str] = []
-    if isinstance(message, str) and message:
-        parts.append(message)
-    if isinstance(latency_ms, int | float):
-        parts.append(f"{latency_ms:.1f}ms")
-
-    return healthy, ", ".join(parts) if parts else None
-
-
-async def _evaluate_component(
+def _unavailable_manager_payload(
+    message: str,
     *,
-    name: str,
-    provider: str,
-    getter: Callable[[], Any],
-) -> tuple[ComponentHealth, bool]:
-    try:
-        resource = getter()
-    except Exception as exc:
-        return (
-            ComponentHealth(
-                name=name,
-                status=HealthStatus.UNHEALTHY,
-                message=str(exc),
-            ),
-            False,
+    details: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    check_payload: dict[str, Any] = {
+        "healthy": False,
+        "latency_ms": 0.0,
+        "message": message,
+    }
+    if details:
+        check_payload["details"] = details
+
+    checks = {"runtime_manager": check_payload}
+    return {
+        "status": "down",
+        "healthy": False,
+        "readiness": False,
+        "liveness": True,
+        "latency_ms": 0.0,
+        "summary": {"total": len(checks), "healthy": 0, "unhealthy": len(checks)},
+        "checks": checks,
+    }
+
+
+async def _runtime_health_payload(*, include_optional_checks: bool) -> dict[str, Any]:
+    manager = get_runtime_manager()
+    if manager is None:
+        return _unavailable_manager_payload(
+            "Runtime resource manager is not initialized"
         )
 
     try:
-        healthy, status_message = await _run_resource_health_check(resource)
-    except Exception as exc:
-        return (
-            ComponentHealth(
-                name=name,
-                status=HealthStatus.UNHEALTHY,
-                message=str(exc),
-            ),
-            False,
+        payload = await manager.health_payload(
+            include_optional_checks=include_optional_checks
         )
-
-    message = f"Provider: {provider}"
-    if status_message:
-        message = f"{message} | {status_message}"
-
-    return (
-        ComponentHealth(
-            name=name,
-            status=HealthStatus.HEALTHY if healthy else HealthStatus.UNHEALTHY,
-            message=message,
-        ),
-        healthy,
-    )
+        if not isinstance(payload, dict):
+            return _unavailable_manager_payload(
+                "Runtime health payload has invalid type",
+                details={"error_type": type(payload).__name__},
+            )
+        return cast("dict[str, Any]", payload)
+    except Exception as exc:
+        return _unavailable_manager_payload(
+            "Runtime health evaluation failed",
+            details={"error_type": type(exc).__name__},
+        )
 
 
 @router.get(
     "/health",
-    response_model=HealthResponse,
+    response_model=RuntimeHealthPayload,
+    response_model_exclude_none=True,
     summary="Health check",
-    description="Get overall health status of the service and its components.",
+    description=(
+        "Aggregated runtime health across managed resources "
+        "and optional observability backends."
+    ),
 )
-async def health_check(
-    settings: SettingsDep,
-    factory: FactoryDep,
-) -> HealthResponse:
-    """Check health of all service components."""
-    checks: dict[str, bool] = {}
-    components: list[ComponentHealth] = []
-
-    for component_name, provider_name, getter in [
-        ("blob_storage", settings.blob_storage.provider, factory.get_blob_storage),
-        ("vector_db", settings.vector_db.provider, factory.get_vector_db),
-        ("document_db", settings.document_db.provider, factory.get_document_db),
-    ]:
-        component_health, healthy = await _evaluate_component(
-            name=component_name,
-            provider=provider_name,
-            getter=getter,
-        )
-        components.append(component_health)
-        checks[component_name] = healthy
-
-    healthy_count = sum(1 for value in checks.values() if value)
-    if healthy_count == len(checks):
-        overall_status = HealthStatus.HEALTHY
-    elif healthy_count == 0:
-        overall_status = HealthStatus.UNHEALTHY
-    else:
-        overall_status = HealthStatus.DEGRADED
-
-    return HealthResponse(
-        status=overall_status,
-        version=settings.app.version,
-        environment=settings.app.environment,
-        components=components,
-    )
+async def health_check() -> dict[str, Any]:
+    """Return runtime health payload."""
+    return await _runtime_health_payload(include_optional_checks=True)
 
 
 @router.get(
@@ -180,35 +133,23 @@ async def liveness() -> LivenessResponse:
 
 @router.get(
     "/health/ready",
-    response_model=ReadinessResponse,
+    response_model=RuntimeHealthPayload,
+    response_model_exclude_none=True,
     summary="Readiness probe",
-    description="Readiness check for Kubernetes probes.",
+    description="Readiness probe backed by required runtime resources.",
+    responses={
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "Service not ready",
+            "model": RuntimeHealthPayload,
+        }
+    },
 )
-async def readiness(
-    factory: FactoryDep,
-    response: Response,
-) -> ReadinessResponse:
-    """Check if service is ready to accept requests.
-
-    Verifies all critical dependencies are available.
-    """
-    checks: dict[str, bool] = {}
-
-    for component_name, getter in [
-        ("blob_storage", factory.get_blob_storage),
-        ("vector_db", factory.get_vector_db),
-        ("document_db", factory.get_document_db),
-    ]:
-        try:
-            resource = getter()
-            healthy, _ = await _run_resource_health_check(resource)
-            checks[component_name] = healthy
-        except Exception:
-            checks[component_name] = False
-
-    # Ready if all critical checks pass
-    ready = all(checks.values())
-    if not ready:
-        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-
-    return ReadinessResponse(ready=ready, checks=checks)
+async def readiness() -> JSONResponse:
+    """Return readiness payload and HTTP 503 when runtime is not ready."""
+    payload = await _runtime_health_payload(include_optional_checks=False)
+    status_code = (
+        status.HTTP_200_OK
+        if payload.get("readiness", False)
+        else status.HTTP_503_SERVICE_UNAVAILABLE
+    )
+    return JSONResponse(status_code=status_code, content=payload)

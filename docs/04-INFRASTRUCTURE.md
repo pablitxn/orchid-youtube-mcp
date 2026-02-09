@@ -979,12 +979,40 @@ Aggregated health endpoint:
 GET /health
 
 {
-  "status": "healthy",
-  "services": {
-    "blob_storage": {"healthy": true, "latency_ms": 12},
-    "vector_db": {"healthy": true, "latency_ms": 8},
-    "document_db": {"healthy": true, "latency_ms": 5},
-    "transcription": {"healthy": true, "latency_ms": 150}
+  "status": "ok",
+  "healthy": true,
+  "readiness": true,
+  "liveness": true,
+  "latency_ms": 7.4,
+  "summary": {
+    "total": 4,
+    "healthy": 4,
+    "unhealthy": 0
+  },
+  "checks": {
+    "multi_bucket": {
+      "healthy": true,
+      "latency_ms": 2.1,
+      "message": "all buckets reachable"
+    },
+    "qdrant": {
+      "healthy": true,
+      "latency_ms": 1.7,
+      "message": "qdrant is healthy"
+    },
+    "mongodb": {
+      "healthy": true,
+      "latency_ms": 3.2,
+      "message": "mongodb ping ok"
+    },
+    "otel": {
+      "healthy": true,
+      "latency_ms": 0.4,
+      "message": "OpenTelemetry providers are active"
+    }
   }
 }
 ```
+
+`GET /health/ready` uses the same payload contract and returns `503` when
+`readiness=false`. This readiness probe excludes optional observability checks.
