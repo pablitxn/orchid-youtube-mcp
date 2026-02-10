@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from orchid_commons import create_fastapi_observability_middleware
 
 from src.adapters.dependencies import get_settings, init_services, shutdown_services
-from src.adapters.middleware.error_handler import error_handler_middleware
+from src.adapters.middleware.error_handler import build_error_middleware
 from src.adapters.api.routes import health, ingestion, query, sources, videos
 
 
@@ -73,7 +73,7 @@ def _configure_middleware(app: FastAPI, settings: Any) -> None:
     app.middleware("http")(create_fastapi_observability_middleware())
 
     # Error handler (as middleware)
-    app.middleware("http")(error_handler_middleware)
+    app.middleware("http")(build_error_middleware())
 
 
 def _register_routes(app: FastAPI, settings: Any) -> None:
