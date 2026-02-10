@@ -70,7 +70,7 @@ def _create_test_app(monkeypatch, manager: _FakeManager | None):
     monkeypatch.setattr("src.adapters.main.init_services", AsyncMock())
     monkeypatch.setattr("src.adapters.main.shutdown_services", AsyncMock())
     monkeypatch.setattr(
-        "src.adapters.openapi.routes.health.get_runtime_manager",
+        "src.adapters.api.routes.health.get_runtime_manager",
         lambda: manager,
     )
     return create_app()

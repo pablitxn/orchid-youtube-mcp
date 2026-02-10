@@ -10,7 +10,7 @@ from orchid_commons import create_fastapi_observability_middleware
 
 from src.adapters.dependencies import get_settings, init_services, shutdown_services
 from src.adapters.middleware.error_handler import error_handler_middleware
-from src.adapters.openapi.routes import health, ingestion, query, sources, videos
+from src.adapters.api.routes import health, ingestion, query, sources, videos
 
 
 @asynccontextmanager
@@ -45,7 +45,7 @@ def create_app() -> FastAPI:
         description="YouTube RAG Server - MCP tools for video content analysis",
         docs_url="/docs" if settings.server.docs_enabled else None,
         redoc_url="/redoc" if settings.server.docs_enabled else None,
-        openapi_url="/openapi.json" if settings.server.docs_enabled else None,
+        openapi_url="/api.json" if settings.server.docs_enabled else None,
         lifespan=lifespan,
     )
 
