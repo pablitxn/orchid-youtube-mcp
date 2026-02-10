@@ -24,6 +24,12 @@ from src.infrastructure.llm import (
     MessageRole,
     OpenAILLMService,
 )
+from src.infrastructure.model_capabilities import (
+    ContentType,
+    ModelCapabilities,
+    get_model_capabilities,
+    get_supported_modalities,
+)
 from src.infrastructure.transcription import (
     OpenAIWhisperTranscription,
     TranscriptionResult,
@@ -51,6 +57,11 @@ from src.infrastructure.youtube import (
 )
 
 __all__ = [
+    # Model Capabilities
+    "ContentType",
+    "ModelCapabilities",
+    "get_model_capabilities",
+    "get_supported_modalities",
     # Factory
     "InfrastructureFactory",
     "get_factory",

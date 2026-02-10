@@ -13,11 +13,6 @@ from src.application.dtos.ingestion import (
     IngestVideoResponse,
     ProcessingStep,
 )
-from src.infrastructure.adapters.blob import BlobStorageAdapter
-from src.infrastructure.adapters.document import DocumentStoreAdapter
-from src.infrastructure.adapters.vector import VectorPoint, VectorStoreAdapter
-from src.commons.settings.models import Settings
-from src.commons.telemetry import LogContext, get_logger
 from src.domain.models.chunk import (
     AudioChunk,
     FrameChunk,
@@ -27,8 +22,13 @@ from src.domain.models.chunk import (
     WordTimestamp,
 )
 from src.domain.models.video import VideoMetadata, VideoStatus
+from src.infrastructure.adapters.blob import BlobStorageAdapter
+from src.infrastructure.adapters.document import DocumentStoreAdapter
+from src.infrastructure.adapters.vector import VectorPoint, VectorStoreAdapter
 from src.infrastructure.embeddings.base import EmbeddingServiceBase
 from src.infrastructure.llm.base import LLMServiceBase
+from src.infrastructure.settings.models import Settings
+from src.infrastructure.telemetry import LogContext, get_logger
 from src.infrastructure.transcription.base import (
     TranscriptionResult,
     TranscriptionServiceBase,
@@ -430,7 +430,7 @@ class VideoIngestionService:
                 )
 
                 # Generate embeddings for frame descriptions (if strategy requires it)
-                from src.commons.settings.models import FrameEmbeddingStrategy
+                from src.infrastructure.settings.models import FrameEmbeddingStrategy
 
                 strategy = self._settings.query.visual.frame_embedding_strategy
                 self._logger.info(

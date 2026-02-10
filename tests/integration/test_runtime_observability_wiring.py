@@ -13,13 +13,13 @@ from orchid_commons import (
     get_observability_handle,
 )
 
-from src.api.main import create_app
-from src.commons import observability
-from src.commons.runtime import get_runtime_manager
+from src.adapters.main import create_app
+from src.infrastructure import observability
 from src.infrastructure.adapters.blob import BlobStorageAdapter
 from src.infrastructure.adapters.document import DocumentStoreAdapter
 from src.infrastructure.adapters.vector import VectorStoreAdapter
 from src.infrastructure.factory import get_factory
+from src.infrastructure.runtime import get_runtime_manager
 
 pytestmark = pytest.mark.integration
 
@@ -32,7 +32,7 @@ async def test_lifespan_wires_runtime_factory_and_observability(
     app = create_app()
 
     with patch(
-        "src.commons.runtime.load_shared_app_settings",
+        "src.infrastructure.runtime.load_shared_app_settings",
         return_value=integration_shared_app_settings,
     ):
         async with app.router.lifespan_context(app):

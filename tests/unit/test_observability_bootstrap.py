@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.commons import observability
+from src.infrastructure import observability
 
 
 @pytest.fixture(autouse=True)
@@ -27,17 +27,17 @@ class TestBootstrapProcessObservability:
 
         with (
             patch(
-                "src.commons.runtime.load_shared_app_settings",
+                "src.infrastructure.runtime.load_shared_app_settings",
                 return_value=shared_settings,
             ),
             patch(
-                "src.commons.observability.bootstrap_logging_from_app_settings"
+                "src.infrastructure.observability.bootstrap_logging_from_app_settings"
             ) as bootstrap_logging,
             patch(
-                "src.commons.observability.bootstrap_observability"
+                "src.infrastructure.observability.bootstrap_observability"
             ) as bootstrap_otel,
             patch(
-                "src.commons.observability.create_langfuse_client",
+                "src.infrastructure.observability.create_langfuse_client",
                 return_value=langfuse_client,
             ) as create_client,
         ):
@@ -60,11 +60,11 @@ class TestBootstrapProcessObservability:
 
         with (
             patch(
-                "src.commons.runtime.load_shared_app_settings",
+                "src.infrastructure.runtime.load_shared_app_settings",
                 return_value=shared_settings,
             ),
             patch(
-                "src.commons.observability.bootstrap_logging_from_app_settings"
+                "src.infrastructure.observability.bootstrap_logging_from_app_settings"
             ) as bootstrap_logging,
         ):
             observability.bootstrap_process_logging(
@@ -88,17 +88,17 @@ class TestBootstrapProcessObservability:
 
         with (
             patch(
-                "src.commons.runtime.load_shared_app_settings",
+                "src.infrastructure.runtime.load_shared_app_settings",
                 return_value=shared_settings,
             ),
             patch(
-                "src.commons.observability.bootstrap_logging_from_app_settings"
+                "src.infrastructure.observability.bootstrap_logging_from_app_settings"
             ) as bootstrap_logging,
             patch(
-                "src.commons.observability.bootstrap_observability"
+                "src.infrastructure.observability.bootstrap_observability"
             ) as bootstrap_otel,
             patch(
-                "src.commons.observability.create_langfuse_client",
+                "src.infrastructure.observability.create_langfuse_client",
                 return_value=langfuse_client,
             ) as create_client,
         ):
@@ -131,19 +131,21 @@ class TestShutdownProcessObservability:
 
         with (
             patch(
-                "src.commons.runtime.load_shared_app_settings",
+                "src.infrastructure.runtime.load_shared_app_settings",
                 return_value=shared_settings,
             ),
-            patch("src.commons.observability.bootstrap_logging_from_app_settings"),
-            patch("src.commons.observability.bootstrap_observability"),
+            patch("src.infrastructure.observability.bootstrap_logging_from_app_settings"),
+            patch("src.infrastructure.observability.bootstrap_observability"),
             patch(
-                "src.commons.observability.create_langfuse_client",
+                "src.infrastructure.observability.create_langfuse_client",
                 return_value=langfuse_client,
             ),
             patch(
-                "src.commons.observability.set_default_langfuse_client"
+                "src.infrastructure.observability.set_default_langfuse_client"
             ) as set_default,
-            patch("src.commons.observability.shutdown_observability") as shutdown_otel,
+            patch(
+                "src.infrastructure.observability.shutdown_observability"
+            ) as shutdown_otel,
         ):
             observability.bootstrap_process_observability(settings)
             observability.shutdown_process_observability()

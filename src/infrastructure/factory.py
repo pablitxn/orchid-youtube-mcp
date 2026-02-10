@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from orchid_commons import ResourceManager
 
-from src.commons.settings.models import Settings
 from src.infrastructure.adapters.blob import BlobStorageAdapter
 from src.infrastructure.adapters.document import DocumentStoreAdapter
 from src.infrastructure.adapters.vector import VectorStoreAdapter
@@ -15,6 +14,7 @@ from src.infrastructure.embeddings import (
     OpenAIEmbeddingService,
 )
 from src.infrastructure.llm import AnthropicLLMService, LLMServiceBase, OpenAILLMService
+from src.infrastructure.settings.models import Settings
 from src.infrastructure.transcription import (
     OpenAIWhisperTranscription,
     TranscriptionServiceBase,

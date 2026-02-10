@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.commons.runtime import REQUIRED_RESOURCES, reset_runtime_state
+from src.infrastructure.runtime import REQUIRED_RESOURCES, reset_runtime_state
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +22,7 @@ class TestRuntimeBootstrap:
     @pytest.mark.asyncio
     async def test_startup_runtime_uses_required_resources(self):
         """Startup should initialize manager with fail-fast required resources."""
-        from src.commons.runtime import startup_runtime
+        from src.infrastructure.runtime import startup_runtime
 
         settings = MagicMock()
         settings.app.environment = "dev"
@@ -32,16 +32,16 @@ class TestRuntimeBootstrap:
         manager = AsyncMock()
 
         with (
-            patch("src.commons.runtime.register_runtime_factories"),
+            patch("src.infrastructure.runtime.register_runtime_factories"),
             patch(
-                "src.commons.runtime.load_shared_app_settings",
+                "src.infrastructure.runtime.load_shared_app_settings",
                 return_value=shared_settings,
             ),
             patch(
-                "src.commons.runtime.ResourceSettings.from_app_settings",
+                "src.infrastructure.runtime.ResourceSettings.from_app_settings",
                 return_value=resource_settings,
             ),
-            patch("src.commons.runtime.ResourceManager", return_value=manager),
+            patch("src.infrastructure.runtime.ResourceManager", return_value=manager),
         ):
             state = await startup_runtime(settings)
 
@@ -54,7 +54,7 @@ class TestRuntimeBootstrap:
     @pytest.mark.asyncio
     async def test_shutdown_runtime_closes_manager(self):
         """Shutdown should close manager-created resources exactly once."""
-        from src.commons.runtime import shutdown_runtime, startup_runtime
+        from src.infrastructure.runtime import shutdown_runtime, startup_runtime
 
         settings = MagicMock()
         settings.app.environment = "dev"
@@ -64,16 +64,16 @@ class TestRuntimeBootstrap:
         manager = AsyncMock()
 
         with (
-            patch("src.commons.runtime.register_runtime_factories"),
+            patch("src.infrastructure.runtime.register_runtime_factories"),
             patch(
-                "src.commons.runtime.load_shared_app_settings",
+                "src.infrastructure.runtime.load_shared_app_settings",
                 return_value=shared_settings,
             ),
             patch(
-                "src.commons.runtime.ResourceSettings.from_app_settings",
+                "src.infrastructure.runtime.ResourceSettings.from_app_settings",
                 return_value=resource_settings,
             ),
-            patch("src.commons.runtime.ResourceManager", return_value=manager),
+            patch("src.infrastructure.runtime.ResourceManager", return_value=manager),
         ):
             await startup_runtime(settings)
             await shutdown_runtime()
@@ -88,7 +88,7 @@ class TestDependencyLifecycle:
     @pytest.mark.asyncio
     async def test_init_services_uses_runtime_manager(self):
         """init_services should bind factory to shared runtime manager."""
-        from src.api.dependencies import init_services
+        from src.adapters.dependencies import init_services
 
         settings = MagicMock()
         manager = MagicMock()
@@ -98,14 +98,14 @@ class TestDependencyLifecycle:
 
         with (
             patch(
-                "src.api.dependencies.bootstrap_process_observability"
+                "src.adapters.dependencies.bootstrap_process_observability"
             ) as bootstrap_process_observability,
             patch(
-                "src.api.dependencies.startup_runtime",
+                "src.adapters.dependencies.startup_runtime",
                 new=AsyncMock(return_value=runtime_state),
             ),
             patch(
-                "src.api.dependencies.get_factory",
+                "src.adapters.dependencies.get_factory",
                 return_value=factory,
             ) as get_factory,
         ):
@@ -123,7 +123,7 @@ class TestDependencyLifecycle:
     @pytest.mark.asyncio
     async def test_init_services_can_configure_uvicorn_logging(self):
         """init_services should pass uvicorn logging flag to observability bootstrap."""
-        from src.api.dependencies import init_services
+        from src.adapters.dependencies import init_services
 
         settings = MagicMock()
         manager = MagicMock()
@@ -132,14 +132,14 @@ class TestDependencyLifecycle:
 
         with (
             patch(
-                "src.api.dependencies.bootstrap_process_observability"
+                "src.adapters.dependencies.bootstrap_process_observability"
             ) as bootstrap_process_observability,
             patch(
-                "src.api.dependencies.startup_runtime",
+                "src.adapters.dependencies.startup_runtime",
                 new=AsyncMock(return_value=runtime_state),
             ),
             patch(
-                "src.api.dependencies.get_factory",
+                "src.adapters.dependencies.get_factory",
                 return_value=factory,
             ),
         ):
@@ -153,19 +153,19 @@ class TestDependencyLifecycle:
     @pytest.mark.asyncio
     async def test_shutdown_services_always_cleans_runtime_state(self):
         """shutdown_services should run cleanup even when factory is missing."""
-        from src.api import dependencies
+        from src.adapters import dependencies
 
         with (
             patch(
-                "src.api.dependencies.get_factory",
+                "src.adapters.dependencies.get_factory",
                 side_effect=ValueError("factory not initialized"),
             ),
             patch(
-                "src.api.dependencies.shutdown_process_observability"
+                "src.adapters.dependencies.shutdown_process_observability"
             ) as shutdown_obs,
-            patch("src.api.dependencies.reset_factory"),
+            patch("src.adapters.dependencies.reset_factory"),
             patch(
-                "src.api.dependencies.shutdown_runtime",
+                "src.adapters.dependencies.shutdown_runtime",
                 new=AsyncMock(),
             ) as shutdown_runtime,
             patch.object(dependencies.get_settings, "cache_clear") as cache_clear,

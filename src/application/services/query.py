@@ -38,15 +38,15 @@ from src.application.services.query_decomposer import (
     SubTask,
     SubTaskResult,
 )
+from src.domain.models.chunk import Modality
 from src.infrastructure.adapters.blob import BlobStorageAdapter
 from src.infrastructure.adapters.document import DocumentStoreAdapter
 from src.infrastructure.adapters.vector import VectorStoreAdapter
-from src.commons.model_capabilities import ContentType
-from src.commons.settings.models import FrameEmbeddingStrategy, Settings
-from src.commons.telemetry import LogContext, get_logger
-from src.domain.models.chunk import Modality
 from src.infrastructure.embeddings.base import EmbeddingServiceBase
 from src.infrastructure.llm.base import LLMServiceBase, Message, MessageRole
+from src.infrastructure.model_capabilities import ContentType
+from src.infrastructure.settings.models import FrameEmbeddingStrategy, Settings
+from src.infrastructure.telemetry import LogContext, get_logger
 
 
 class VideoQueryService:

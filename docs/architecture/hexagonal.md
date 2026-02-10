@@ -98,7 +98,7 @@ class VideoIngestionService:
 Outbound ports define what the application needs from external services.
 
 ```python
-# src/commons/infrastructure/blob/base.py
+# src/infrastructure/infrastructure/blob/base.py
 class BlobStorageBase(ABC):
     """Outbound port for blob storage."""
 
@@ -140,7 +140,7 @@ Driving adapters call into the application.
 === "MCP Server"
 
     ```python
-    # src/api/mcp/server.py
+    # src/adapters/mcp/server.py
     @mcp.tool()
     async def ingest_video(url: str) -> dict:
         """MCP adapter - calls inbound port."""
@@ -152,7 +152,7 @@ Driving adapters call into the application.
 === "REST API"
 
     ```python
-    # src/api/openapi/routes/ingestion.py
+    # src/adapters/openapi/routes/ingestion.py
     @router.post("/videos/ingest")
     async def ingest_video(
         request: IngestVideoRequest,
@@ -172,7 +172,7 @@ Driven adapters implement outbound ports.
 === "MinIO"
 
     ```python
-    # src/commons/infrastructure/blob/minio_provider.py
+    # src/infrastructure/infrastructure/blob/minio_provider.py
     class MinIOBlobStorage(BlobStorageBase):
         """MinIO adapter implementing blob storage port."""
 
@@ -187,7 +187,7 @@ Driven adapters implement outbound ports.
 === "S3"
 
     ```python
-    # src/commons/infrastructure/blob/s3_provider.py
+    # src/infrastructure/infrastructure/blob/s3_provider.py
     class S3BlobStorage(BlobStorageBase):
         """AWS S3 adapter implementing blob storage port."""
 

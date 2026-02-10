@@ -313,7 +313,7 @@ RUN pip install uv && uv sync --frozen
 # Copy application
 COPY src/ src/
 
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0"]
+CMD ["uvicorn", "src.adapters.main:app", "--host", "0.0.0.0"]
 ```
 
 ### Docker Compose

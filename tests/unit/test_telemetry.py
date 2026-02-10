@@ -6,8 +6,13 @@ import logging
 
 import pytest
 
-from src.commons.telemetry.decorators import LogContext, log_exceptions, timed, trace
-from src.commons.telemetry.logger import (
+from src.infrastructure.telemetry.decorators import (
+    LogContext,
+    log_exceptions,
+    timed,
+    trace,
+)
+from src.infrastructure.telemetry.logger import (
     JsonFormatter,
     TextFormatter,
     clear_log_context,

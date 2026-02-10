@@ -3,11 +3,6 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 
-from src.commons.model_capabilities import (
-    ContentType,
-    get_model_capabilities,
-    get_supported_modalities,
-)
 from src.domain.models.chunk import (
     AudioChunk,
     BaseChunk,
@@ -16,6 +11,11 @@ from src.domain.models.chunk import (
     VideoChunk,
 )
 from src.infrastructure.llm.base import Message, MessageRole
+from src.infrastructure.model_capabilities import (
+    ContentType,
+    get_model_capabilities,
+    get_supported_modalities,
+)
 
 if TYPE_CHECKING:
     from src.infrastructure.adapters.blob import BlobStorageAdapter

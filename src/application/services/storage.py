@@ -4,10 +4,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.infrastructure.adapters.blob import BlobStorageAdapter
-from src.infrastructure.adapters.document import DocumentStoreAdapter
-from src.commons.settings.models import BlobStorageSettings, DocumentDBSettings
-from src.commons.telemetry import get_logger
 from src.domain.models.chunk import (
     AnyChunk,
     AudioChunk,
@@ -17,6 +13,10 @@ from src.domain.models.chunk import (
     VideoChunk,
 )
 from src.domain.models.video import VideoMetadata, VideoStatus
+from src.infrastructure.adapters.blob import BlobStorageAdapter
+from src.infrastructure.adapters.document import DocumentStoreAdapter
+from src.infrastructure.settings.models import BlobStorageSettings, DocumentDBSettings
+from src.infrastructure.telemetry import get_logger
 
 
 class VideoStorageService:

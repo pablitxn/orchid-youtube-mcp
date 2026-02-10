@@ -5,9 +5,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from src.commons.telemetry import get_logger
 from src.domain.models.chunk import Modality
 from src.infrastructure.llm.base import LLMServiceBase, Message, MessageRole
+from src.infrastructure.telemetry import get_logger
 
 
 class SubTaskStatus(str, Enum):
