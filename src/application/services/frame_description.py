@@ -5,7 +5,7 @@ import base64
 from pathlib import Path
 from typing import Any
 
-from src.commons.infrastructure.blob.base import BlobStorageBase
+from src.infrastructure.adapters.blob import BlobStorageAdapter
 from src.commons.model_capabilities import ContentType, get_supported_modalities
 from src.commons.settings.models import VisualQuerySettings
 from src.commons.telemetry import get_logger
@@ -24,7 +24,7 @@ class FrameDescriptionService:
     def __init__(
         self,
         llm_service: LLMServiceBase,
-        blob_storage: BlobStorageBase | None = None,
+        blob_storage: BlobStorageAdapter | None = None,
         settings: VisualQuerySettings | None = None,
         frames_bucket: str = "rag-frames",
     ) -> None:

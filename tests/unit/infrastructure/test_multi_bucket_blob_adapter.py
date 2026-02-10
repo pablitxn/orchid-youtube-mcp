@@ -1,4 +1,4 @@
-"""Unit tests for MultiBucketBlobStorageAdapter."""
+"""Unit tests for BlobStorageAdapter."""
 
 from __future__ import annotations
 
@@ -10,9 +10,7 @@ import pytest
 from orchid_commons.blob.s3 import BlobObject
 from orchid_commons.runtime.health import HealthStatus as CommonsHealthStatus
 
-from src.commons.infrastructure.blob.multi_bucket_adapter import (
-    MultiBucketBlobStorageAdapter,
-)
+from src.infrastructure.adapters.blob import BlobStorageAdapter
 
 
 @pytest.fixture
@@ -66,13 +64,13 @@ def router_fixture():
     return {"router": router, "storages": storages}
 
 
-class TestMultiBucketBlobStorageAdapter:
+class TestBlobStorageAdapter:
     @pytest.mark.asyncio
     async def test_upload_routes_physical_bucket_to_alias(self, router_fixture):
         router = router_fixture["router"]
 
-        adapter = MultiBucketBlobStorageAdapter(router=router)
-        metadata = await adapter.upload(
+        adapter = BlobStorageAdapter(router=router)
+        await adapter.upload(
             "rag-videos",
             "video-1/video.mp4",
             b"video-bytes",
@@ -86,14 +84,12 @@ class TestMultiBucketBlobStorageAdapter:
             content_type="video/mp4",
             metadata=None,
         )
-        assert metadata.path == "video-1/video.mp4"
-        assert metadata.size_bytes == 123
 
     @pytest.mark.asyncio
     async def test_download_routes_alias(self, router_fixture):
         router = router_fixture["router"]
 
-        adapter = MultiBucketBlobStorageAdapter(router=router)
+        adapter = BlobStorageAdapter(router=router)
         data = await adapter.download("videos", "video-1/video.mp4")
 
         assert data == b"video-bytes"
@@ -104,7 +100,7 @@ class TestMultiBucketBlobStorageAdapter:
         router = router_fixture["router"]
         router.exists.return_value = False
 
-        adapter = MultiBucketBlobStorageAdapter(router=router)
+        adapter = BlobStorageAdapter(router=router)
         deleted = await adapter.delete("rag-frames", "video-1/frames/frame_00001.jpg")
 
         assert deleted is False
@@ -115,7 +111,7 @@ class TestMultiBucketBlobStorageAdapter:
         router = router_fixture["router"]
         router.exists.return_value = True
 
-        adapter = MultiBucketBlobStorageAdapter(router=router)
+        adapter = BlobStorageAdapter(router=router)
         deleted = await adapter.delete("rag-frames", "video-1/frames/frame_00001.jpg")
 
         assert deleted is True
@@ -128,7 +124,7 @@ class TestMultiBucketBlobStorageAdapter:
     async def test_presign_routes_with_expiry(self, router_fixture):
         router = router_fixture["router"]
 
-        adapter = MultiBucketBlobStorageAdapter(router=router)
+        adapter = BlobStorageAdapter(router=router)
         url = await adapter.generate_presigned_url(
             "rag-chunks",
             "video-1/chunks/chunk_0001.json",
@@ -165,7 +161,7 @@ class TestMultiBucketBlobStorageAdapter:
             ),
         ]
 
-        adapter = MultiBucketBlobStorageAdapter(router=router_fixture["router"])
+        adapter = BlobStorageAdapter(router=router_fixture["router"])
         blobs = await adapter.list_blobs(
             "rag-chunks",
             prefix="video-1/chunks/",
@@ -173,7 +169,7 @@ class TestMultiBucketBlobStorageAdapter:
         )
 
         assert len(blobs) == 1
-        assert blobs[0].path == "video-1/chunks/chunk_0001.json"
+        assert blobs[0] == "video-1/chunks/chunk_0001.json"
         storages["chunks"]._client.list_objects.assert_called_once_with(
             "rag-chunks",
             prefix="video-1/chunks/",
@@ -182,7 +178,7 @@ class TestMultiBucketBlobStorageAdapter:
 
     @pytest.mark.asyncio
     async def test_unknown_bucket_raises_key_error(self, router_fixture):
-        adapter = MultiBucketBlobStorageAdapter(router=router_fixture["router"])
+        adapter = BlobStorageAdapter(router=router_fixture["router"])
 
         with pytest.raises(KeyError, match="Unknown bucket alias or name"):
             await adapter.exists("non-existent-bucket", "video.mp4")

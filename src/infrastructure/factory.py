@@ -5,21 +5,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from orchid_commons import ResourceManager
 
-from src.commons.infrastructure.blob import (
-    BlobStorageBase,
-    MultiBucketBlobStorageAdapter,
-)
-from src.commons.infrastructure.documentdb import (
-    CommonsMongoDocumentDBAdapter,
-    DocumentDBBase,
-    MongoDBDocumentDB,
-)
-from src.commons.infrastructure.vectordb import (
-    CommonsVectorStoreAdapter,
-    QdrantVectorDB,
-    VectorDBBase,
-)
 from src.commons.settings.models import Settings
+from src.infrastructure.adapters.blob import BlobStorageAdapter
+from src.infrastructure.adapters.document import DocumentStoreAdapter
+from src.infrastructure.adapters.vector import VectorStoreAdapter
 from src.infrastructure.embeddings import (
     CLIPEmbeddingService,
     EmbeddingServiceBase,
@@ -68,7 +57,7 @@ class InfrastructureFactory:
         """Attach shared resource manager after factory creation."""
         self._resource_manager = resource_manager
 
-    def get_blob_storage(self) -> BlobStorageBase:
+    def get_blob_storage(self) -> BlobStorageAdapter:
         """Get blob storage instance.
 
         Returns:
@@ -80,18 +69,18 @@ class InfrastructureFactory:
                 and self._resource_manager.has("multi_bucket")
             ):
                 managed_resource = self._resource_manager.get("multi_bucket")
-                if isinstance(managed_resource, MultiBucketBlobStorageAdapter):
+                if isinstance(managed_resource, BlobStorageAdapter):
                     self._instances["blob_storage"] = managed_resource
                 else:
-                    self._instances["blob_storage"] = MultiBucketBlobStorageAdapter(
+                    self._instances["blob_storage"] = BlobStorageAdapter(
                         router=cast("MultiBucketBlobRouter", managed_resource)
                     )
                 self._manager_owned_instances.add("blob_storage")
-                return cast("BlobStorageBase", self._instances["blob_storage"])
+                return cast("BlobStorageAdapter", self._instances["blob_storage"])
 
             blob_settings = self._settings.blob_storage
             self._instances["blob_storage"] = (
-                MultiBucketBlobStorageAdapter.from_settings(
+                BlobStorageAdapter.from_settings(
                     endpoint=blob_settings.endpoint,
                     access_key=blob_settings.access_key,
                     secret_key=blob_settings.secret_key,
@@ -104,9 +93,9 @@ class InfrastructureFactory:
                     },
                 )
             )
-        return cast("BlobStorageBase", self._instances["blob_storage"])
+        return cast("BlobStorageAdapter", self._instances["blob_storage"])
 
-    def get_vector_db(self) -> VectorDBBase:
+    def get_vector_db(self) -> VectorStoreAdapter:
         """Get vector database instance.
 
         Returns:
@@ -118,26 +107,29 @@ class InfrastructureFactory:
                 and self._resource_manager.has("qdrant")
             ):
                 managed_resource = self._resource_manager.get("qdrant")
-                if isinstance(managed_resource, VectorDBBase):
+                if isinstance(managed_resource, VectorStoreAdapter):
                     self._instances["vector_db"] = managed_resource
                 else:
-                    self._instances["vector_db"] = CommonsVectorStoreAdapter(
+                    self._instances["vector_db"] = VectorStoreAdapter(
                         managed_resource
                     )
                 self._manager_owned_instances.add("vector_db")
-                return cast("VectorDBBase", self._instances["vector_db"])
+                return cast("VectorStoreAdapter", self._instances["vector_db"])
+
+            from orchid_commons.db import QdrantVectorStore
 
             vector_settings = self._settings.vector_db
-            self._instances["vector_db"] = QdrantVectorDB(
+            store = QdrantVectorStore.create(
                 host=vector_settings.host,
                 port=vector_settings.port,
                 grpc_port=vector_settings.grpc_port,
                 api_key=vector_settings.api_key,
                 https=vector_settings.use_ssl,
             )
-        return cast("VectorDBBase", self._instances["vector_db"])
+            self._instances["vector_db"] = VectorStoreAdapter(store)
+        return cast("VectorStoreAdapter", self._instances["vector_db"])
 
-    def get_document_db(self) -> DocumentDBBase:
+    def get_document_db(self) -> DocumentStoreAdapter:
         """Get document database instance.
 
         Returns:
@@ -149,17 +141,18 @@ class InfrastructureFactory:
                 and self._resource_manager.has("mongodb")
             ):
                 managed_resource = self._resource_manager.get("mongodb")
-                if isinstance(managed_resource, DocumentDBBase):
+                if isinstance(managed_resource, DocumentStoreAdapter):
                     self._instances["document_db"] = managed_resource
                 else:
-                    self._instances["document_db"] = CommonsMongoDocumentDBAdapter(
+                    self._instances["document_db"] = DocumentStoreAdapter(
                         managed_resource
                     )
                 self._manager_owned_instances.add("document_db")
-                return cast("DocumentDBBase", self._instances["document_db"])
+                return cast("DocumentStoreAdapter", self._instances["document_db"])
+
+            from orchid_commons.db import MongoDbResource
 
             doc_settings = self._settings.document_db
-            # Build connection string from settings
             if doc_settings.username and doc_settings.password:
                 connection_string = (
                     f"mongodb://{doc_settings.username}:{doc_settings.password}"
@@ -168,11 +161,12 @@ class InfrastructureFactory:
                 )
             else:
                 connection_string = f"mongodb://{doc_settings.host}:{doc_settings.port}"
-            self._instances["document_db"] = MongoDBDocumentDB(
-                connection_string=connection_string,
-                database_name=doc_settings.database,
+            resource = MongoDbResource.create(
+                uri=connection_string,
+                database=doc_settings.database,
             )
-        return cast("DocumentDBBase", self._instances["document_db"])
+            self._instances["document_db"] = DocumentStoreAdapter(resource)
+        return cast("DocumentStoreAdapter", self._instances["document_db"])
 
     def get_youtube_downloader(self) -> YouTubeDownloaderBase:
         """Get YouTube downloader instance.

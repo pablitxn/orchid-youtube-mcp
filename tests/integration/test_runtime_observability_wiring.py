@@ -15,10 +15,10 @@ from orchid_commons import (
 
 from src.api.main import create_app
 from src.commons import observability
-from src.commons.infrastructure.blob import MultiBucketBlobStorageAdapter
-from src.commons.infrastructure.documentdb import CommonsMongoDocumentDBAdapter
-from src.commons.infrastructure.vectordb import CommonsVectorStoreAdapter
 from src.commons.runtime import get_runtime_manager
+from src.infrastructure.adapters.blob import BlobStorageAdapter
+from src.infrastructure.adapters.document import DocumentStoreAdapter
+from src.infrastructure.adapters.vector import VectorStoreAdapter
 from src.infrastructure.factory import get_factory
 
 pytestmark = pytest.mark.integration
@@ -43,9 +43,9 @@ async def test_lifespan_wires_runtime_factory_and_observability(
             assert manager.has("qdrant")
 
             factory = get_factory()
-            assert isinstance(factory.get_blob_storage(), MultiBucketBlobStorageAdapter)
-            assert isinstance(factory.get_document_db(), CommonsMongoDocumentDBAdapter)
-            assert isinstance(factory.get_vector_db(), CommonsVectorStoreAdapter)
+            assert isinstance(factory.get_blob_storage(), BlobStorageAdapter)
+            assert isinstance(factory.get_document_db(), DocumentStoreAdapter)
+            assert isinstance(factory.get_vector_db(), VectorStoreAdapter)
 
             state = observability._StateHolder.state
             assert state is not None
@@ -81,4 +81,3 @@ async def test_lifespan_wires_runtime_factory_and_observability(
 
     assert get_runtime_manager() is None
     assert observability._StateHolder.state is None
-

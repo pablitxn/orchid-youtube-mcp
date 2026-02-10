@@ -18,7 +18,7 @@ from src.domain.models.chunk import (
 from src.infrastructure.llm.base import Message, MessageRole
 
 if TYPE_CHECKING:
-    from src.commons.infrastructure.blob.base import BlobStorageBase
+    from src.infrastructure.adapters.blob import BlobStorageAdapter
 
 
 @dataclass
@@ -128,7 +128,7 @@ class MultimodalMessageBuilder:
         self,
         model_id: str,
         enabled_modalities: set[ContentType] | None = None,
-        blob_storage: "BlobStorageBase | None" = None,
+        blob_storage: "BlobStorageAdapter | None" = None,
     ) -> None:
         """Initialize the builder.
 
@@ -467,7 +467,7 @@ def create_context_message(
     query: str,
     model_id: str,
     enabled_modalities: set[ContentType] | None = None,
-    blob_storage: "BlobStorageBase | None" = None,
+    blob_storage: "BlobStorageAdapter | None" = None,
     system_prompt: str | None = None,
 ) -> list[Message]:
     """Convenience function to create messages from chunks.

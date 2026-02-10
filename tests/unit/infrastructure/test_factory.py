@@ -6,9 +6,9 @@ import pytest
 from orchid_commons.blob import MultiBucketBlobRouter
 from orchid_commons.config.resources import MultiBucketSettings
 
-from src.commons.infrastructure.blob import MultiBucketBlobStorageAdapter
-from src.commons.infrastructure.documentdb import CommonsMongoDocumentDBAdapter
-from src.commons.infrastructure.vectordb import CommonsVectorStoreAdapter
+from src.infrastructure.adapters.blob import BlobStorageAdapter
+from src.infrastructure.adapters.document import DocumentStoreAdapter
+from src.infrastructure.adapters.vector import VectorStoreAdapter
 from src.infrastructure.factory import (
     InfrastructureFactory,
     get_factory,
@@ -108,7 +108,7 @@ class TestInfrastructureFactory:
         assert chunker is not None
         assert factory.get_video_chunker() is chunker
 
-    @patch("src.infrastructure.factory.MultiBucketBlobStorageAdapter.from_settings")
+    @patch("src.infrastructure.adapters.blob.BlobStorageAdapter.from_settings")
     def test_get_blob_storage(self, mock_from_settings, mock_settings):
         """Test getting blob storage."""
         mock_instance = MagicMock()
@@ -163,25 +163,11 @@ class TestInfrastructureFactory:
         factory = InfrastructureFactory(mock_settings, resource_manager=manager)
         blob = factory.get_blob_storage()
 
-        assert isinstance(blob, MultiBucketBlobStorageAdapter)
+        assert isinstance(blob, BlobStorageAdapter)
         manager.get.assert_called_once_with("multi_bucket")
 
-    @patch("src.infrastructure.factory.QdrantVectorDB")
-    def test_get_vector_db(self, mock_qdrant_class, mock_settings):
-        """Test getting vector database."""
-        mock_instance = MagicMock()
-        mock_qdrant_class.return_value = mock_instance
-
-        factory = InfrastructureFactory(mock_settings)
-        vector_db = factory.get_vector_db()
-
-        assert vector_db is mock_instance
-        mock_qdrant_class.assert_called_once()
-
-    @patch("src.infrastructure.factory.QdrantVectorDB")
     def test_get_vector_db_from_resource_manager(
         self,
-        mock_qdrant_class,
         mock_settings,
     ):
         """Test vector db is reused from ResourceManager when available."""
@@ -193,45 +179,11 @@ class TestInfrastructureFactory:
         factory = InfrastructureFactory(mock_settings, resource_manager=manager)
         vector_db = factory.get_vector_db()
 
-        assert isinstance(vector_db, CommonsVectorStoreAdapter)
-        mock_qdrant_class.assert_not_called()
+        assert isinstance(vector_db, VectorStoreAdapter)
         manager.get.assert_called_once_with("qdrant")
 
-    @patch("src.infrastructure.factory.MongoDBDocumentDB")
-    def test_get_document_db_without_auth(self, mock_mongo_class, mock_settings):
-        """Test getting document database without authentication."""
-        mock_instance = MagicMock()
-        mock_mongo_class.return_value = mock_instance
-
-        factory = InfrastructureFactory(mock_settings)
-        doc_db = factory.get_document_db()
-
-        assert doc_db is mock_instance
-        mock_mongo_class.assert_called_once_with(
-            connection_string="mongodb://localhost:27017",
-            database_name="test_db",
-        )
-
-    @patch("src.infrastructure.factory.MongoDBDocumentDB")
-    def test_get_document_db_with_auth(self, mock_mongo_class, mock_settings):
-        """Test getting document database with authentication."""
-        mock_settings.document_db.username = "user"
-        mock_settings.document_db.password = "pass"
-
-        mock_instance = MagicMock()
-        mock_mongo_class.return_value = mock_instance
-
-        factory = InfrastructureFactory(mock_settings)
-        doc_db = factory.get_document_db()
-
-        assert doc_db is mock_instance
-        call_args = mock_mongo_class.call_args
-        assert "user:pass" in call_args.kwargs["connection_string"]
-
-    @patch("src.infrastructure.factory.MongoDBDocumentDB")
     def test_get_document_db_from_resource_manager(
         self,
-        mock_mongo_class,
         mock_settings,
     ):
         """Test document db is reused from ResourceManager when available."""
@@ -243,8 +195,7 @@ class TestInfrastructureFactory:
         factory = InfrastructureFactory(mock_settings, resource_manager=manager)
         document_db = factory.get_document_db()
 
-        assert isinstance(document_db, CommonsMongoDocumentDBAdapter)
-        mock_mongo_class.assert_not_called()
+        assert isinstance(document_db, DocumentStoreAdapter)
         manager.get.assert_called_once_with("mongodb")
 
     @patch("src.infrastructure.factory.OpenAIWhisperTranscription")

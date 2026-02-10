@@ -151,8 +151,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
-    "src.commons.infrastructure.blob.*",
-    "src.commons.infrastructure.vectordb.*",
+    "src.infrastructure.adapters.*",
     "src.infrastructure.llm.*",
     "src.infrastructure.transcription.*",
 ]

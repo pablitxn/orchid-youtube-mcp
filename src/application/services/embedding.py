@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from src.commons.infrastructure.vectordb.base import VectorDBBase, VectorPoint
+from src.infrastructure.adapters.vector import VectorPoint, VectorStoreAdapter
 from src.commons.telemetry import get_logger
 from src.domain.models.chunk import (
     AnyChunk,
@@ -38,7 +38,7 @@ class EmbeddingOrchestrator:
         self,
         text_embedder: EmbeddingServiceBase,
         image_embedder: EmbeddingServiceBase | None,
-        vector_db: VectorDBBase,
+        vector_db: VectorStoreAdapter,
         text_collection: str,
         image_collection: str | None = None,
     ) -> None:
