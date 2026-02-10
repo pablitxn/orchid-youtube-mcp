@@ -47,9 +47,15 @@ The configuration system follows a hierarchical loading pattern that supports:
 config/
 ├── appsettings.json              # Base defaults
 ├── appsettings.dev.json          # Development overrides
+├── appsettings.development.json  # commons-first alias for development
 ├── appsettings.staging.json      # Staging overrides
-└── appsettings.prod.json         # Production overrides
+├── appsettings.prod.json         # Production overrides
+└── appsettings.production.json   # commons-first alias for production
 ```
+
+`youtube-mcp` still uses `YOUTUBE_RAG__APP__ENVIRONMENT` (`dev`/`staging`/`prod`) as primary selector.
+The `development`/`production` files are kept as compatibility aliases for the shared
+commons-first appsettings convention used across Orchid repos.
 
 ### Base Configuration (appsettings.json)
 

@@ -1,4 +1,5 @@
 # Development Guide
 
-!!! info "Coming Soon"
-    This section is under development.
+This section tracks shared engineering standards and local workflows.
+
+- `commons-first-standard.md`: cross-repo runtime/quality baseline.
