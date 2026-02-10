@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import TYPE_CHECKING, BinaryIO, Literal, cast
 
 from orchid_commons.blob import BlobNotFoundError, MultiBucketBlobRouter
 from orchid_commons.config.resources import MultiBucketSettings
-
-from src.commons.infrastructure.blob.base import (
-    BlobMetadata,
-    BlobStorageBase,
-    HealthStatus,
-)
+from orchid_commons.runtime.health import HealthStatus
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping
@@ -24,7 +19,7 @@ if TYPE_CHECKING:
 _NOT_FOUND_CODES = {"NoSuchBucket", "NoSuchKey", "NotFound"}
 
 
-class MultiBucketBlobStorageAdapter(BlobStorageBase):
+class BlobStorageAdapter:
     """Adapter to keep youtube-mcp blob contract over commons router.
 
     The existing app contract passes a ``bucket`` on each call. ``orchid_commons``
@@ -59,7 +54,7 @@ class MultiBucketBlobStorageAdapter(BlobStorageBase):
         secure: bool = False,
         region: str | None = None,
         create_buckets_if_missing: bool = False,
-    ) -> MultiBucketBlobStorageAdapter:
+    ) -> BlobStorageAdapter:
         """Build adapter directly from endpoint and alias bucket map."""
         try:
             from minio import Minio
@@ -104,7 +99,7 @@ class MultiBucketBlobStorageAdapter(BlobStorageBase):
         data: BinaryIO | bytes,
         content_type: str = "application/octet-stream",
         metadata: dict[str, str] | None = None,
-    ) -> BlobMetadata:
+    ) -> None:
         alias = self._resolve_alias(bucket)
         payload = data if isinstance(data, bytes) else bytes(data.read())
 
@@ -115,7 +110,6 @@ class MultiBucketBlobStorageAdapter(BlobStorageBase):
             content_type=content_type,
             metadata=metadata,
         )
-        return await self.get_metadata(bucket, path)
 
     async def download(self, bucket: str, path: str) -> bytes:
         alias = self._resolve_alias(bucket)
@@ -179,33 +173,6 @@ class MultiBucketBlobStorageAdapter(BlobStorageBase):
         alias = self._resolve_alias(bucket)
         return cast("bool", await self._router.exists(alias, path))
 
-    async def get_metadata(self, bucket: str, path: str) -> BlobMetadata:
-        alias = self._resolve_alias(bucket)
-        storage = self._get_storage(alias)
-        physical_bucket = storage.bucket
-        client = storage._client
-
-        try:
-            stat = await asyncio.to_thread(client.stat_object, physical_bucket, path)
-        except Exception as exc:
-            if getattr(exc, "code", None) in _NOT_FOUND_CODES:
-                raise BlobNotFoundError(
-                    "get_metadata", physical_bucket, path, str(exc)
-                ) from exc
-            raise
-
-        created_at = getattr(stat, "last_modified", None) or datetime.now(UTC)
-        return BlobMetadata(
-            path=path,
-            size_bytes=int(getattr(stat, "size", 0) or 0),
-            content_type=(
-                getattr(stat, "content_type", None)
-                or "application/octet-stream"
-            ),
-            created_at=created_at,
-            etag=getattr(stat, "etag", "") or "",
-        )
-
     async def generate_presigned_url(
         self,
         bucket: str,
@@ -238,35 +205,21 @@ class MultiBucketBlobStorageAdapter(BlobStorageBase):
         bucket: str,
         prefix: str = "",
         max_results: int = 1000,
-    ) -> list[BlobMetadata]:
+    ) -> list[str]:
         alias = self._resolve_alias(bucket)
         storage = self._get_storage(alias)
         physical_bucket = storage.bucket
         client = storage._client
 
-        def _list() -> list[BlobMetadata]:
-            results: list[BlobMetadata] = []
+        def _list() -> list[str]:
+            results: list[str] = []
             objects = client.list_objects(
                 physical_bucket,
                 prefix=prefix,
                 recursive=True,
             )
             for obj in objects:
-                results.append(
-                    BlobMetadata(
-                        path=obj.object_name,
-                        size_bytes=int(getattr(obj, "size", 0) or 0),
-                        content_type=(
-                            getattr(obj, "content_type", None)
-                            or "application/octet-stream"
-                        ),
-                        created_at=(
-                            getattr(obj, "last_modified", None)
-                            or datetime.now(UTC)
-                        ),
-                        etag=getattr(obj, "etag", "") or "",
-                    )
-                )
+                results.append(obj.object_name)
                 if len(results) >= max_results:
                     break
             return results

@@ -13,9 +13,9 @@ from src.application.dtos.ingestion import (
     IngestVideoResponse,
     ProcessingStep,
 )
-from src.commons.infrastructure.blob.base import BlobStorageBase
-from src.commons.infrastructure.documentdb.base import DocumentDBBase
-from src.commons.infrastructure.vectordb.base import VectorDBBase, VectorPoint
+from src.infrastructure.adapters.blob import BlobStorageAdapter
+from src.infrastructure.adapters.document import DocumentStoreAdapter
+from src.infrastructure.adapters.vector import VectorPoint, VectorStoreAdapter
 from src.commons.settings.models import Settings
 from src.commons.telemetry import LogContext, get_logger
 from src.domain.models.chunk import (
@@ -65,9 +65,9 @@ class VideoIngestionService:
         transcription_service: TranscriptionServiceBase,
         text_embedding_service: EmbeddingServiceBase,
         frame_extractor: FrameExtractorBase,
-        blob_storage: BlobStorageBase,
-        vector_db: VectorDBBase,
-        document_db: DocumentDBBase,
+        blob_storage: BlobStorageAdapter,
+        vector_db: VectorStoreAdapter,
+        document_db: DocumentStoreAdapter,
         settings: Settings,
         video_chunker: VideoChunkerBase | None = None,
         llm_service: LLMServiceBase | None = None,

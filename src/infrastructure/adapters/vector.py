@@ -4,17 +4,30 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from orchid_commons.db import VectorPoint as CommonsVectorPoint
 from orchid_commons.db import VectorStore
+from orchid_commons.runtime.health import HealthStatus
 
-from src.commons.infrastructure.blob.base import HealthStatus
-from src.commons.infrastructure.vectordb.base import (
-    SearchResult,
-    VectorDBBase,
-    VectorPoint,
-)
+
+@dataclass
+class VectorPoint:
+    """A vector with its ID and payload."""
+
+    id: str
+    vector: list[float]
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SearchResult:
+    """Result from a vector search."""
+
+    id: str
+    score: float
+    payload: dict[str, Any]
 
 
 def _normalize_dense_vector(raw: Any) -> list[float] | None:
@@ -36,19 +49,6 @@ def _normalize_dense_vector(raw: Any) -> list[float] | None:
     return None
 
 
-def _to_local_health(status: Any) -> HealthStatus:
-    details = None
-    if status.details is not None:
-        details = {key: str(value) for key, value in status.details.items()}
-
-    return HealthStatus(
-        healthy=status.healthy,
-        latency_ms=status.latency_ms,
-        message=status.message,
-        details=details,
-    )
-
-
 def _should_use_qdrant_search_fallback(exc: Exception) -> bool:
     message = str(exc).lower()
     return (
@@ -60,48 +60,48 @@ def _should_use_qdrant_search_fallback(exc: Exception) -> bool:
 def _build_qdrant_filter(filters: dict[str, Any], models: Any) -> Any:
     conditions: list[Any] = []
 
-    for field, value in filters.items():
+    for field_name, value in filters.items():
         if isinstance(value, dict):
             for op, op_value in value.items():
                 if op == "$gte":
                     conditions.append(
                         models.FieldCondition(
-                            key=field,
+                            key=field_name,
                             range=models.Range(gte=op_value),
                         )
                     )
                 elif op == "$gt":
                     conditions.append(
                         models.FieldCondition(
-                            key=field,
+                            key=field_name,
                             range=models.Range(gt=op_value),
                         )
                     )
                 elif op == "$lte":
                     conditions.append(
                         models.FieldCondition(
-                            key=field,
+                            key=field_name,
                             range=models.Range(lte=op_value),
                         )
                     )
                 elif op == "$lt":
                     conditions.append(
                         models.FieldCondition(
-                            key=field,
+                            key=field_name,
                             range=models.Range(lt=op_value),
                         )
                     )
                 elif op == "$in":
                     conditions.append(
                         models.FieldCondition(
-                            key=field,
+                            key=field_name,
                             match=models.MatchAny(any=op_value),
                         )
                     )
         else:
             conditions.append(
                 models.FieldCondition(
-                    key=field,
+                    key=field_name,
                     match=models.MatchValue(value=value),
                 )
             )
@@ -109,7 +109,7 @@ def _build_qdrant_filter(filters: dict[str, Any], models: Any) -> Any:
     return models.Filter(must=conditions)
 
 
-class CommonsVectorStoreAdapter(VectorDBBase):
+class VectorStoreAdapter:
     """Expose app VectorDB contract over commons ``VectorStore``."""
 
     def __init__(self, store: VectorStore) -> None:
@@ -320,7 +320,15 @@ class CommonsVectorStoreAdapter(VectorDBBase):
 
     async def health_check(self) -> HealthStatus:
         status = await self._store.health_check()
-        return _to_local_health(status)
+        details = None
+        if status.details is not None:
+            details = {key: str(value) for key, value in status.details.items()}
+        return HealthStatus(
+            healthy=status.healthy,
+            latency_ms=status.latency_ms,
+            message=status.message,
+            details=details,
+        )
 
     async def ensure_payload_indexes(self, collection: str) -> None:
         client = self._client()
@@ -332,11 +340,11 @@ class CommonsVectorStoreAdapter(VectorDBBase):
             from qdrant_client import models
 
             scoped_collection = self._scoped_collection(collection)
-            for field in ("video_id", "modality"):
+            for field_name in ("video_id", "modality"):
                 with contextlib.suppress(Exception):
                     await create_payload_index(
                         collection_name=scoped_collection,
-                        field_name=field,
+                        field_name=field_name,
                         field_schema=models.PayloadSchemaType.KEYWORD,
                     )
 

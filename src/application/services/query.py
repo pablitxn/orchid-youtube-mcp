@@ -38,9 +38,9 @@ from src.application.services.query_decomposer import (
     SubTask,
     SubTaskResult,
 )
-from src.commons.infrastructure.blob.base import BlobStorageBase
-from src.commons.infrastructure.documentdb.base import DocumentDBBase
-from src.commons.infrastructure.vectordb.base import VectorDBBase
+from src.infrastructure.adapters.blob import BlobStorageAdapter
+from src.infrastructure.adapters.document import DocumentStoreAdapter
+from src.infrastructure.adapters.vector import VectorStoreAdapter
 from src.commons.model_capabilities import ContentType
 from src.commons.settings.models import FrameEmbeddingStrategy, Settings
 from src.commons.telemetry import LogContext, get_logger
@@ -60,10 +60,10 @@ class VideoQueryService:
         self,
         text_embedding_service: EmbeddingServiceBase,
         llm_service: LLMServiceBase,
-        vector_db: VectorDBBase,
-        document_db: DocumentDBBase,
+        vector_db: VectorStoreAdapter,
+        document_db: DocumentStoreAdapter,
         settings: Settings,
-        blob_storage: BlobStorageBase | None = None,
+        blob_storage: BlobStorageAdapter | None = None,
     ) -> None:
         """Initialize query service.
 

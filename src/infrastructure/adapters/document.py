@@ -5,25 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from bson import ObjectId
-
-from src.commons.infrastructure.blob.base import HealthStatus
-from src.commons.infrastructure.documentdb.base import DocumentDBBase
+from orchid_commons.runtime.health import HealthStatus
 
 
-def _to_local_health(status: Any) -> HealthStatus:
-    details = None
-    if status.details is not None:
-        details = {key: str(value) for key, value in status.details.items()}
-
-    return HealthStatus(
-        healthy=status.healthy,
-        latency_ms=status.latency_ms,
-        message=status.message,
-        details=details,
-    )
-
-
-class CommonsMongoDocumentDBAdapter(DocumentDBBase):
+class DocumentStoreAdapter:
     """Expose app DocumentDB contract over commons MongoDB resource."""
 
     def __init__(self, resource: Any) -> None:
@@ -223,7 +208,15 @@ class CommonsMongoDocumentDBAdapter(DocumentDBBase):
 
     async def health_check(self) -> HealthStatus:
         status = await self._resource.health_check()
-        return _to_local_health(status)
+        details = None
+        if status.details is not None:
+            details = {key: str(value) for key, value in status.details.items()}
+        return HealthStatus(
+            healthy=status.healthy,
+            latency_ms=status.latency_ms,
+            message=status.message,
+            details=details,
+        )
 
     async def close(self) -> None:
         await self._resource.close()

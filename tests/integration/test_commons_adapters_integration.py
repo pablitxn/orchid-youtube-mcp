@@ -12,9 +12,9 @@ import pytest_asyncio
 from orchid_commons import create_mongodb_resource, create_qdrant_vector_store
 from orchid_commons.config.resources import MongoDbSettings, QdrantSettings
 
-from src.commons.infrastructure.blob import MultiBucketBlobStorageAdapter
-from src.commons.infrastructure.documentdb import CommonsMongoDocumentDBAdapter
-from src.commons.infrastructure.vectordb import CommonsVectorStoreAdapter, VectorPoint
+from src.infrastructure.adapters.blob import BlobStorageAdapter
+from src.infrastructure.adapters.document import DocumentStoreAdapter
+from src.infrastructure.adapters.vector import VectorPoint, VectorStoreAdapter
 
 if TYPE_CHECKING:
     from tests.integration.conftest import IntegrationServiceConfig
@@ -23,7 +23,7 @@ pytestmark = pytest.mark.integration
 
 
 async def _wait_for_count(
-    adapter: CommonsVectorStoreAdapter,
+    adapter: VectorStoreAdapter,
     collection: str,
     expected: int,
     *,
@@ -40,9 +40,9 @@ async def _wait_for_count(
 @pytest_asyncio.fixture
 async def blob_adapter(
     require_integration_services: IntegrationServiceConfig,
-) -> MultiBucketBlobStorageAdapter:
+) -> BlobStorageAdapter:
     config = require_integration_services
-    adapter = MultiBucketBlobStorageAdapter.from_settings(
+    adapter = BlobStorageAdapter.from_settings(
         endpoint=config.minio_endpoint,
         access_key=config.minio_access_key,
         secret_key=config.minio_secret_key,
@@ -60,7 +60,7 @@ async def blob_adapter(
 @pytest_asyncio.fixture
 async def mongo_adapter(
     require_integration_services: IntegrationServiceConfig,
-) -> CommonsMongoDocumentDBAdapter:
+) -> DocumentStoreAdapter:
     config = require_integration_services
     mongodb_uri = config.mongodb_uri
     if mongodb_uri is None:
@@ -76,7 +76,7 @@ async def mongo_adapter(
             app_name="youtube-mcp-integration-tests",
         )
     )
-    adapter = CommonsMongoDocumentDBAdapter(resource)
+    adapter = DocumentStoreAdapter(resource)
     try:
         yield adapter
     finally:
@@ -86,7 +86,7 @@ async def mongo_adapter(
 @pytest_asyncio.fixture
 async def vector_adapter(
     require_integration_services: IntegrationServiceConfig,
-) -> CommonsVectorStoreAdapter:
+) -> VectorStoreAdapter:
     config = require_integration_services
     store = await create_qdrant_vector_store(
         QdrantSettings(
@@ -101,7 +101,7 @@ async def vector_adapter(
             collection_prefix=f"ytmcp_it_{uuid4().hex[:8]}",
         )
     )
-    adapter = CommonsVectorStoreAdapter(store)
+    adapter = VectorStoreAdapter(store)
     try:
         yield adapter
     finally:
@@ -110,7 +110,7 @@ async def vector_adapter(
 
 @pytest.mark.asyncio
 async def test_blob_adapter_real_crud_cycle(
-    blob_adapter: MultiBucketBlobStorageAdapter,
+    blob_adapter: BlobStorageAdapter,
 ) -> None:
     key = f"integration/{uuid4().hex}/payload.txt"
     payload = b"orchid commons integration"
@@ -119,15 +119,14 @@ async def test_blob_adapter_real_crud_cycle(
     # Ensure bucket exists first; this is idempotent.
     await blob_adapter.create_bucket(bucket_alias)
 
-    uploaded = await blob_adapter.upload(
+    # upload returns None now
+    await blob_adapter.upload(
         bucket_alias,
         key,
         payload,
         content_type="text/plain",
         metadata={"test-suite": "integration"},
     )
-    assert uploaded.path == key
-    assert uploaded.size_bytes == len(payload)
 
     try:
         assert await blob_adapter.exists(bucket_alias, key) is True
@@ -138,7 +137,7 @@ async def test_blob_adapter_real_crud_cycle(
             prefix=key.rsplit("/", 1)[0],
             max_results=100,
         )
-        assert any(blob.path == key for blob in listed)
+        assert any(path == key for path in listed)
 
         health = await blob_adapter.health_check()
         assert health.healthy is True
@@ -149,7 +148,7 @@ async def test_blob_adapter_real_crud_cycle(
 
 @pytest.mark.asyncio
 async def test_mongodb_adapter_real_crud_cycle(
-    mongo_adapter: CommonsMongoDocumentDBAdapter,
+    mongo_adapter: DocumentStoreAdapter,
 ) -> None:
     collection = f"it_docs_{uuid4().hex}"
     document_id = f"doc-{uuid4().hex}"
@@ -201,7 +200,7 @@ async def test_mongodb_adapter_real_crud_cycle(
 
 @pytest.mark.asyncio
 async def test_qdrant_adapter_real_search_and_delete_cycle(
-    vector_adapter: CommonsVectorStoreAdapter,
+    vector_adapter: VectorStoreAdapter,
 ) -> None:
     collection = f"it_vectors_{uuid4().hex}"
     first_id = str(uuid4())

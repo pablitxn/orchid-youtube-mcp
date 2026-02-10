@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.commons.infrastructure.blob.base import BlobStorageBase
-from src.commons.infrastructure.documentdb.base import DocumentDBBase
+from src.infrastructure.adapters.blob import BlobStorageAdapter
+from src.infrastructure.adapters.document import DocumentStoreAdapter
 from src.commons.settings.models import BlobStorageSettings, DocumentDBSettings
 from src.commons.telemetry import get_logger
 from src.domain.models.chunk import (
@@ -31,8 +31,8 @@ class VideoStorageService:
 
     def __init__(
         self,
-        blob_storage: BlobStorageBase,
-        document_db: DocumentDBBase,
+        blob_storage: BlobStorageAdapter,
+        document_db: DocumentStoreAdapter,
         blob_settings: BlobStorageSettings,
         doc_settings: DocumentDBSettings,
     ) -> None:
@@ -498,8 +498,8 @@ class VideoStorageService:
             self._videos_bucket,
             prefix=f"{video_id}/",
         )
-        for blob in video_blobs:
-            if await self._blob.delete(self._videos_bucket, blob.path):
+        for path in video_blobs:
+            if await self._blob.delete(self._videos_bucket, path):
                 deleted += 1
 
         # Delete from frames bucket
@@ -511,8 +511,8 @@ class VideoStorageService:
             self._frames_bucket,
             prefix=f"{video_id}/",
         )
-        for blob in frame_blobs:
-            if await self._blob.delete(self._frames_bucket, blob.path):
+        for path in frame_blobs:
+            if await self._blob.delete(self._frames_bucket, path):
                 deleted += 1
 
         # Delete from chunks bucket
@@ -524,8 +524,8 @@ class VideoStorageService:
             self._chunks_bucket,
             prefix=f"{video_id}/",
         )
-        for blob in chunk_blobs:
-            if await self._blob.delete(self._chunks_bucket, blob.path):
+        for path in chunk_blobs:
+            if await self._blob.delete(self._chunks_bucket, path):
                 deleted += 1
 
         self._logger.info(
