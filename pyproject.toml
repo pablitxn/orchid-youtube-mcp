@@ -209,7 +209,7 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-orchid-skills-commons = { git = "ssh://git@github.com/pablitxn/orchid_skills_commons_py.git" }
+orchid-skills-commons = { git = "ssh://git@github.com/pablitxn/orchid-skills-commons.git" }
 
 [dependency-groups]
 dev = [
