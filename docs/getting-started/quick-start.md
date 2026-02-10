@@ -9,11 +9,8 @@ Get YouTube RAG Server running in 5 minutes.
 git clone https://github.com/youtube-rag-server/youtube-rag-server.git
 cd youtube-rag-server
 
-# Install with uv (recommended)
+# Install with uv
 uv sync --dev
-
-# Or with pip
-pip install -e ".[dev]"
 ```
 
 ## 2. Start Infrastructure
@@ -63,6 +60,16 @@ The API will be available at http://localhost:8000
 
 - OpenAPI docs: http://localhost:8000/docs
 - Health check: http://localhost:8000/health
+
+## Quality Baseline
+
+Use the shared commons-first baseline for daily checks:
+
+```bash
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run pytest -m "not integration and not e2e"
+```
 
 ## 5. Ingest Your First Video
 
