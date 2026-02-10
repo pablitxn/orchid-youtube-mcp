@@ -67,7 +67,7 @@ poetry install
 docker-compose up -d
 
 # Run the server
-poetry run uvicorn src.api.main:app --reload
+poetry run uvicorn src.adapters.main:app --reload
 ```
 
 ### Project Structure

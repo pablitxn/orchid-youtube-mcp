@@ -5,12 +5,12 @@ import base64
 from pathlib import Path
 from typing import Any
 
-from src.infrastructure.adapters.blob import BlobStorageAdapter
-from src.commons.model_capabilities import ContentType, get_supported_modalities
-from src.commons.settings.models import VisualQuerySettings
-from src.commons.telemetry import get_logger
 from src.domain.models.chunk import FrameChunk
+from src.infrastructure.adapters.blob import BlobStorageAdapter
 from src.infrastructure.llm.base import LLMServiceBase, Message, MessageRole
+from src.infrastructure.model_capabilities import ContentType, get_supported_modalities
+from src.infrastructure.settings.models import VisualQuerySettings
+from src.infrastructure.telemetry import get_logger
 
 
 class FrameDescriptionService:

@@ -3,8 +3,6 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.commons.settings.models import ChunkingSettings
-from src.commons.telemetry import get_logger
 from src.domain.models.chunk import (
     AudioChunk,
     FrameChunk,
@@ -12,6 +10,8 @@ from src.domain.models.chunk import (
     VideoChunk,
     WordTimestamp,
 )
+from src.infrastructure.settings.models import ChunkingSettings
+from src.infrastructure.telemetry import get_logger
 from src.infrastructure.transcription.base import TranscriptionSegment
 from src.infrastructure.video.base import FrameExtractorBase, VideoChunkerBase
 

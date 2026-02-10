@@ -7,8 +7,12 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from src.commons.settings.loader import SettingsLoader, get_settings, reset_settings
-from src.commons.settings.models import (
+from src.infrastructure.settings.loader import (
+    SettingsLoader,
+    get_settings,
+    reset_settings,
+)
+from src.infrastructure.settings.models import (
     AppSettings,
     BlobStorageSettings,
     ChunkingSettings,
@@ -107,7 +111,7 @@ class TestBlobStorageSettings:
         assert settings.buckets.frames == "rag-frames"
 
     def test_custom_buckets(self):
-        from src.commons.settings.models import BucketSettings
+        from src.infrastructure.settings.models import BucketSettings
 
         settings = BlobStorageSettings(
             buckets=BucketSettings(

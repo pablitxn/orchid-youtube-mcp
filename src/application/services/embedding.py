@@ -2,15 +2,15 @@
 
 from dataclasses import dataclass
 
-from src.infrastructure.adapters.vector import VectorPoint, VectorStoreAdapter
-from src.commons.telemetry import get_logger
 from src.domain.models.chunk import (
     AnyChunk,
     FrameChunk,
     Modality,
     TranscriptChunk,
 )
+from src.infrastructure.adapters.vector import VectorPoint, VectorStoreAdapter
 from src.infrastructure.embeddings.base import EmbeddingServiceBase
+from src.infrastructure.telemetry import get_logger
 
 
 @dataclass

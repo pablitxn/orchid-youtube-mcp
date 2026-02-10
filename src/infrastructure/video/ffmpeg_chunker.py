@@ -5,7 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from src.commons.telemetry import get_logger
+from src.infrastructure.telemetry import get_logger
 from src.infrastructure.video.base import (
     AudioSegment,
     VideoChunkerBase,

@@ -68,11 +68,11 @@ This document breaks down the implementation into phases with specific tasks. Ea
 #### 1.1 Settings System
 
 - [x] **1.1.1** Create Pydantic settings models
-  - [x] `src/commons/settings/models.py`
+  - [x] `src/infrastructure/settings/models.py`
   - [x] All settings classes from 05-CONFIGURATION.md
 
 - [x] **1.1.2** Implement settings loader
-  - [x] `src/commons/settings/loader.py`
+  - [x] `src/infrastructure/settings/loader.py`
   - [x] JSON file loading
   - [x] Environment variable merging
   - [x] Environment-specific overrides
@@ -85,13 +85,13 @@ This document breaks down the implementation into phases with specific tasks. Ea
 #### 1.2 Telemetry
 
 - [x] **1.2.1** Create structured logger
-  - [x] `src/commons/telemetry/logger.py`
+  - [x] `src/infrastructure/telemetry/logger.py`
   - [x] JSON formatted output
   - [x] Correlation ID support
   - [x] Context management
 
 - [x] **1.2.2** Create decorators
-  - [x] `src/commons/telemetry/decorators.py`
+  - [x] `src/infrastructure/telemetry/decorators.py`
   - [x] `@trace` for function tracing
   - [x] `@log_exceptions` for error logging
   - [x] `@timed` for performance metrics
@@ -101,14 +101,14 @@ This document breaks down the implementation into phases with specific tasks. Ea
 #### 1.3 Infrastructure Base Classes
 
 - [x] **1.3.1** Create blob storage ABC
-  - [x] `src/commons/infrastructure/blob/base.py`
+  - [x] `src/infrastructure/infrastructure/blob/base.py`
   - [x] All methods from 04-INFRASTRUCTURE.md
 
 - [x] **1.3.2** Create vector DB ABC
-  - [x] `src/commons/infrastructure/vectordb/base.py`
+  - [x] `src/infrastructure/infrastructure/vectordb/base.py`
 
 - [x] **1.3.3** Create document DB ABC
-  - [x] `src/commons/infrastructure/documentdb/base.py`
+  - [x] `src/infrastructure/infrastructure/documentdb/base.py`
 
 ---
 
@@ -181,7 +181,7 @@ This document breaks down the implementation into phases with specific tasks. Ea
 #### 3.1 Blob Storage
 
 - [x] **3.1.1** Implement MinIO provider
-  - [x] `src/commons/infrastructure/blob/minio_provider.py`
+  - [x] `src/infrastructure/infrastructure/blob/minio_provider.py`
   - [x] All CRUD operations
   - [x] Presigned URL generation
 
@@ -192,7 +192,7 @@ This document breaks down the implementation into phases with specific tasks. Ea
 #### 3.2 Vector Database
 
 - [x] **3.2.1** Implement Qdrant provider
-  - [x] `src/commons/infrastructure/vectordb/qdrant_provider.py`
+  - [x] `src/infrastructure/infrastructure/vectordb/qdrant_provider.py`
   - [x] Collection management
   - [x] Vector upsert/search
   - [x] Filtering
@@ -202,7 +202,7 @@ This document breaks down the implementation into phases with specific tasks. Ea
 #### 3.3 Document Database
 
 - [x] **3.3.1** Implement MongoDB provider
-  - [x] `src/commons/infrastructure/documentdb/mongodb_provider.py`
+  - [x] `src/infrastructure/infrastructure/documentdb/mongodb_provider.py`
   - [x] CRUD operations
   - [x] Query building
 
@@ -360,44 +360,44 @@ This document breaks down the implementation into phases with specific tasks. Ea
 #### 5.1 FastAPI Setup
 
 - [x] **5.1.1** Create app factory
-  - [x] `src/api/main.py`
+  - [x] `src/adapters/main.py`
   - [x] Lifespan management
   - [x] Middleware setup
 
 - [x] **5.1.2** Create dependency injection
-  - [x] `src/api/dependencies.py`
+  - [x] `src/adapters/dependencies.py`
   - [x] Settings injection
   - [x] Service injection
 
 - [x] **5.1.3** Create middleware
-  - [x] `src/api/middleware/logging.py`
-  - [x] `src/api/middleware/error_handler.py`
+  - [x] `src/adapters/middleware/logging.py`
+  - [x] `src/adapters/middleware/error_handler.py`
   - [x] Request ID tracking
   - [x] Error formatting
 
 #### 5.2 REST Endpoints
 
 - [x] **5.2.1** Ingestion routes
-  - [x] `src/api/openapi/routes/ingestion.py`
+  - [x] `src/adapters/openapi/routes/ingestion.py`
   - [x] `POST /videos/ingest`
   - [x] `GET /videos/{id}/status`
 
 - [x] **5.2.2** Query routes
-  - [x] `src/api/openapi/routes/query.py`
+  - [x] `src/adapters/openapi/routes/query.py`
   - [x] `POST /videos/{id}/query`
 
 - [x] **5.2.3** Source routes
-  - [x] `src/api/openapi/routes/sources.py`
+  - [x] `src/adapters/openapi/routes/sources.py`
   - [x] `GET /videos/{id}/sources`
 
 - [x] **5.2.4** Management routes
-  - [x] `src/api/openapi/routes/videos.py`
+  - [x] `src/adapters/openapi/routes/videos.py`
   - [x] `GET /videos`
   - [x] `GET /videos/{id}`
   - [x] `DELETE /videos/{id}`
 
 - [x] **5.2.5** Health routes
-  - [x] `src/api/openapi/routes/health.py`
+  - [x] `src/adapters/openapi/routes/health.py`
   - [x] `GET /health`
   - [x] `GET /health/live`
   - [x] `GET /health/ready`
@@ -405,7 +405,7 @@ This document breaks down the implementation into phases with specific tasks. Ea
 #### 5.3 MCP Server
 
 - [x] **5.3.1** MCP protocol implementation
-  - [x] `src/api/mcp/server.py`
+  - [x] `src/adapters/mcp/server.py`
   - [x] Tool registration
   - [x] Request handling
 

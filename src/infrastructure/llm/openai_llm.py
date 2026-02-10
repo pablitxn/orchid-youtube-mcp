@@ -12,7 +12,6 @@ from openai.types.chat import (
     ChatCompletionToolParam,
 )
 
-from src.commons.telemetry import create_llm_generation, end_llm_generation
 from src.infrastructure.llm.base import (
     FunctionCall,
     FunctionDefinition,
@@ -23,6 +22,7 @@ from src.infrastructure.llm.base import (
     Message,
     MessageRole,
 )
+from src.infrastructure.telemetry import create_llm_generation, end_llm_generation
 
 
 class OpenAILLMService(LLMServiceBase):

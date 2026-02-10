@@ -5,7 +5,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from src.commons.model_capabilities import ContentType
+from src.infrastructure.model_capabilities import ContentType
 
 
 class QueryModality(str, Enum):

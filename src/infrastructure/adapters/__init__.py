@@ -5,7 +5,11 @@ from orchid_commons.runtime.health import HealthStatus
 
 from src.infrastructure.adapters.blob import BlobStorageAdapter
 from src.infrastructure.adapters.document import DocumentStoreAdapter
-from src.infrastructure.adapters.vector import SearchResult, VectorPoint, VectorStoreAdapter
+from src.infrastructure.adapters.vector import (
+    SearchResult,
+    VectorPoint,
+    VectorStoreAdapter,
+)
 
 __all__ = [
     "BlobNotFoundError",

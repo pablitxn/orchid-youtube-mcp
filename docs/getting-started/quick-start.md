@@ -53,7 +53,7 @@ YOUTUBE_RAG__LLM__API_KEY=sk-...
 
 ```bash
 # Run the development server
-uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn src.adapters.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The API will be available at http://localhost:8000

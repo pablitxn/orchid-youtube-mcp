@@ -14,8 +14,8 @@ from minio import Minio
 from motor.motor_asyncio import AsyncIOMotorClient
 from qdrant_client import AsyncQdrantClient
 
-from src.commons.runtime import load_shared_app_settings
-from src.commons.settings.loader import get_settings, reset_settings
+from src.infrastructure.runtime import load_shared_app_settings
+from src.infrastructure.settings.loader import get_settings, reset_settings
 
 
 @dataclass(slots=True)

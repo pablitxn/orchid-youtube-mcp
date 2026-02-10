@@ -79,7 +79,7 @@ Services:
 ### 4) Run the REST API
 
 ```bash
-uv run uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn src.adapters.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 - OpenAPI: `http://localhost:8000/docs`
@@ -125,7 +125,7 @@ Available MCP tools:
 Run (stdio):
 
 ```bash
-uv run python -c "import asyncio; from src.api.mcp import run_mcp_server; asyncio.run(run_mcp_server())"
+uv run python -c "import asyncio; from src.adapters.mcp import run_mcp_server; asyncio.run(run_mcp_server())"
 ```
 
 ## Commons package (`orchid-skills-commons` / `orchid_commons`)
@@ -133,11 +133,11 @@ uv run python -c "import asyncio; from src.api.mcp import run_mcp_server; asynci
 This repo uses `orchid-skills-commons[blob,db,observability]` as a shared runtime base.
 
 Where it integrates:
-- `src/commons/runtime.py`: `ResourceManager`, `load_config`, resource startup/shutdown (`multi_bucket`, `qdrant`, `mongodb`).
-- `src/commons/observability.py`: logging bootstrap, OpenTelemetry/Langfuse and uvicorn logger wiring.
-- `src/commons/infrastructure/blob/multi_bucket_adapter.py`: adapts `MultiBucketBlobRouter` to the local `BlobStorageBase` contract.
-- `src/commons/infrastructure/vectordb/commons_adapter.py`: adapts `VectorStore` to the local `VectorDBBase` contract.
-- `src/commons/infrastructure/documentdb/commons_adapter.py`: adapts the commons MongoDB resource to the local `DocumentDBBase` contract.
+- `src/infrastructure/runtime.py`: `ResourceManager`, `load_config`, resource startup/shutdown (`multi_bucket`, `qdrant`, `mongodb`).
+- `src/infrastructure/observability.py`: logging bootstrap, OpenTelemetry/Langfuse and uvicorn logger wiring.
+- `src/infrastructure/infrastructure/blob/multi_bucket_adapter.py`: adapts `MultiBucketBlobRouter` to the local `BlobStorageBase` contract.
+- `src/infrastructure/infrastructure/vectordb/commons_adapter.py`: adapts `VectorStore` to the local `VectorDBBase` contract.
+- `src/infrastructure/infrastructure/documentdb/commons_adapter.py`: adapts the commons MongoDB resource to the local `DocumentDBBase` contract.
 
 Why it matters:
 - Standardizes configuration and lifecycle across repos.

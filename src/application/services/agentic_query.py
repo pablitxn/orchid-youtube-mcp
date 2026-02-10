@@ -16,8 +16,8 @@ from src.application.dtos.query import (
     ToolCall,
     VideoResult,
 )
-from src.commons.telemetry import get_logger
 from src.infrastructure.llm.base import LLMServiceBase, Message, MessageRole
+from src.infrastructure.telemetry import get_logger
 
 logger = get_logger(__name__)
 

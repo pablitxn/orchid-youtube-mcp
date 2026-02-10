@@ -253,7 +253,7 @@ pytest --cov=src --cov-report=html
 
 ```bash
 # Run with auto-reload
-uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn src.adapters.main:app --reload --host 0.0.0.0 --port 8000
 
 # Check health
 curl http://localhost:8000/health

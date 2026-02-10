@@ -4,16 +4,15 @@
 Core code lives in `src/` and follows a layered architecture:
 - `src/domain/`: entities, value objects, and domain exceptions.
 - `src/application/`: DTOs and business services (ingestion, query, chunking).
-- `src/infrastructure/`: provider implementations (YouTube, LLM, embeddings, transcription, video).
-- `src/api/`: FastAPI app, REST routes, MCP server tools, middleware.
-- `src/commons/`: shared settings, runtime wiring, telemetry, and storage adapters.
+- `src/infrastructure/`: provider implementations (YouTube, LLM, embeddings, transcription, video), shared settings, runtime wiring, telemetry, and storage adapters.
+- `src/adapters/`: FastAPI app, REST routes, MCP server tools, middleware.
 
 Tests are organized in `tests/unit/`, `tests/integration/`, and `tests/e2e/`. Runtime configuration lives in `config/` (`appsettings*.json`), and maintenance utilities live in `scripts/`.
 
 ## Build, Test, and Development Commands
 - `uv sync --dev`: install dependencies for local development.
 - `docker-compose up -d`: start MongoDB, Qdrant, and MinIO locally.
-- `uv run uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`: run the API server.
+- `uv run uvicorn src.adapters.main:app --reload --host 0.0.0.0 --port 8000`: run the API server.
 - `uv run ruff check src tests`: lint and import/order checks.
 - `uv run ruff format src tests`: apply formatting.
 - `uv run mypy src`: strict type-checking for source code.
