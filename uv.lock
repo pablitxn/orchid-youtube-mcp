@@ -1904,7 +1904,7 @@ wheels = [
 [[package]]
 name = "orchid-skills-commons"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/pablitxn/orchid_skills_commons_py.git#1ce90414e69ca4d59e9522e48a3802733a8bc5cc" }
+source = { git = "ssh://git@github.com/pablitxn/orchid-skills-commons.git#9683e1f9879f30a74174f99b71d504da88c04719" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "pydantic" },
@@ -3570,7 +3570,7 @@ requires-dist = [
     { name = "motor", specifier = ">=3.6.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
     { name = "openai", specifier = ">=1.55.0" },
-    { name = "orchid-skills-commons", extras = ["blob", "db", "observability"], git = "ssh://git@github.com/pablitxn/orchid_skills_commons_py.git" },
+    { name = "orchid-skills-commons", extras = ["blob", "db", "observability"], git = "ssh://git@github.com/pablitxn/orchid-skills-commons.git" },
     { name = "pillow", specifier = ">=11.0.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pydantic", specifier = ">=2.0" },
