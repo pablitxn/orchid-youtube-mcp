@@ -1,8 +1,10 @@
 """API middleware components."""
 
-from src.adapters.middleware.error_handler import APIError, error_handler_middleware
+from orchid_commons import APIError
+
+from src.adapters.middleware.error_handler import build_error_middleware
 
 __all__ = [
     "APIError",
-    "error_handler_middleware",
+    "build_error_middleware",
 ]
