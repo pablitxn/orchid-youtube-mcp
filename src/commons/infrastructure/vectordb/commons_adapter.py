@@ -49,6 +49,66 @@ def _to_local_health(status: Any) -> HealthStatus:
     )
 
 
+def _should_use_qdrant_search_fallback(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "has no attribute 'search'" in message
+        or "object has no attribute search" in message
+    )
+
+
+def _build_qdrant_filter(filters: dict[str, Any], models: Any) -> Any:
+    conditions: list[Any] = []
+
+    for field, value in filters.items():
+        if isinstance(value, dict):
+            for op, op_value in value.items():
+                if op == "$gte":
+                    conditions.append(
+                        models.FieldCondition(
+                            key=field,
+                            range=models.Range(gte=op_value),
+                        )
+                    )
+                elif op == "$gt":
+                    conditions.append(
+                        models.FieldCondition(
+                            key=field,
+                            range=models.Range(gt=op_value),
+                        )
+                    )
+                elif op == "$lte":
+                    conditions.append(
+                        models.FieldCondition(
+                            key=field,
+                            range=models.Range(lte=op_value),
+                        )
+                    )
+                elif op == "$lt":
+                    conditions.append(
+                        models.FieldCondition(
+                            key=field,
+                            range=models.Range(lt=op_value),
+                        )
+                    )
+                elif op == "$in":
+                    conditions.append(
+                        models.FieldCondition(
+                            key=field,
+                            match=models.MatchAny(any=op_value),
+                        )
+                    )
+        else:
+            conditions.append(
+                models.FieldCondition(
+                    key=field,
+                    match=models.MatchValue(value=value),
+                )
+            )
+
+    return models.Filter(must=conditions)
+
+
 class CommonsVectorStoreAdapter(VectorDBBase):
     """Expose app VectorDB contract over commons ``VectorStore``."""
 
@@ -143,22 +203,57 @@ class CommonsVectorStoreAdapter(VectorDBBase):
         filters: dict[str, Any] | None = None,
         score_threshold: float | None = None,
     ) -> list[SearchResult]:
-        results = await self._store.search(
-            collection,
-            query_vector,
+        try:
+            results = await self._store.search(
+                collection,
+                query_vector,
+                limit=limit,
+                filters=filters,
+                score_threshold=score_threshold,
+                with_payload=True,
+                with_vectors=False,
+            )
+            return [
+                SearchResult(
+                    id=str(result.id),
+                    score=result.score,
+                    payload=dict(result.payload),
+                )
+                for result in results
+            ]
+        except Exception as exc:
+            if not _should_use_qdrant_search_fallback(exc):
+                raise
+            fallback_exc = exc
+
+        client = self._client()
+        query_points = getattr(client, "query_points", None)
+        if not callable(query_points):
+            raise fallback_exc
+
+        try:
+            from qdrant_client import models
+        except ImportError:
+            raise fallback_exc from None
+
+        query_filter = _build_qdrant_filter(filters, models) if filters else None
+        response = await query_points(
+            collection_name=self._scoped_collection(collection),
+            query=query_vector,
             limit=limit,
-            filters=filters,
+            query_filter=query_filter,
             score_threshold=score_threshold,
             with_payload=True,
             with_vectors=False,
         )
+        points = getattr(response, "points", [])
         return [
             SearchResult(
-                id=str(result.id),
-                score=result.score,
-                payload=dict(result.payload),
+                id=str(point.id),
+                score=float(point.score or 0.0),
+                payload=dict(point.payload or {}),
             )
-            for result in results
+            for point in points
         ]
 
     async def delete_by_filter(
