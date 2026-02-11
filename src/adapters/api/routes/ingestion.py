@@ -145,7 +145,7 @@ async def get_ingestion_status(
     result = await service.get_ingestion_status(video_id)
 
     if result is None:
-        from src.adapters.middleware.error_handler import APIError
+        from orchid_commons import APIError
 
         raise APIError(
             code="VIDEO_NOT_FOUND",
