@@ -8,7 +8,7 @@ from fastapi import APIRouter, Header, Query, status
 from pydantic import BaseModel, Field
 
 from src.adapters.dependencies import IngestionServiceDep
-from src.adapters.middleware.error_handler import APIError
+from orchid_commons import APIError
 from src.application.dtos.ingestion import IngestionStatus
 from src.domain.models.video import VideoStatus
 
