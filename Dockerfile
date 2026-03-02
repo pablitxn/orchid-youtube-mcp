@@ -5,6 +5,9 @@
 # =============================================================================
 FROM python:3.14-slim AS builder
 
+# Install git (required for git dependencies)
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
