@@ -19,7 +19,7 @@ class HealthCheckStatus(BaseModel):
     healthy: bool = Field(description="Whether the dependency is healthy")
     latency_ms: float = Field(description="Latency for this health check")
     message: str | None = Field(default=None, description="Optional check message")
-    details: dict[str, str] | None = Field(
+    details: dict[str, Any] | None = Field(
         default=None,
         description="Optional details such as provider or error_type",
     )
