@@ -29,7 +29,7 @@ dependencies = [
     "mcp>=1.0.0",
     # Observability
     "langfuse>=2.0.0",
-    "orchid-skills-commons[blob,db,observability]",
+    "orchid-mcp-commons[blob,db,observability]",
 ]
 
 [project.optional-dependencies]
@@ -208,7 +208,7 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-orchid-skills-commons = { git = "ssh://git@github.com/pablitxn/orchid-skills-commons.git" }
+orchid-mcp-commons = { git = "https://github.com/pablitxn/orchid-skills-commons.git" }
 
 [dependency-groups]
 dev = [
