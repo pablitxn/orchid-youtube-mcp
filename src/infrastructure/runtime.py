@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from orchid_commons import (
     ResourceManager,
-    ResourceSettings,
     load_config,
 )
 from orchid_commons.blob import register_multi_bucket_factory
@@ -65,7 +64,7 @@ async def startup_runtime(settings: Settings) -> RuntimeState:
     register_runtime_factories()
 
     shared_settings = load_shared_app_settings(settings.app.environment)
-    resource_settings = ResourceSettings.from_app_settings(shared_settings)
+    resource_settings = shared_settings.resources
 
     manager = ResourceManager()
     await manager.startup(
