@@ -39,7 +39,7 @@ def test_messages_endpoint_is_served_by_mcp_transport(monkeypatch) -> None:
 
     with TestClient(app) as client:
         response = client.post(
-            "/messages",
+            "/messages/",
             content="{}",
             headers={"content-type": "application/json"},
         )
