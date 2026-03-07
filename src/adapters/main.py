@@ -100,7 +100,7 @@ def _register_routes(app: FastAPI, settings: Any) -> None:
 def _register_mcp_routes(app: FastAPI) -> None:
     """Expose the MCP server over SSE on the same FastAPI app."""
     mcp_server = create_mcp_server()
-    sse_transport = SseServerTransport("/messages")
+    sse_transport = SseServerTransport("/messages/")
 
     async def handle_sse(scope: Scope, receive: Receive, send: Send) -> Response:
         async with sse_transport.connect_sse(scope, receive, send) as streams:
