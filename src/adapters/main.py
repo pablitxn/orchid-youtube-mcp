@@ -6,11 +6,16 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from mcp.server.sse import SseServerTransport
 from orchid_commons import create_fastapi_observability_middleware
+from starlette.requests import Request
+from starlette.responses import Response
+from starlette.types import Receive, Scope, Send
 
-from src.adapters.dependencies import get_settings, init_services, shutdown_services
-from src.adapters.middleware.error_handler import build_error_middleware
 from src.adapters.api.routes import health, ingestion, query, sources, videos
+from src.adapters.dependencies import get_settings, init_services, shutdown_services
+from src.adapters.mcp.server import create_mcp_server
+from src.adapters.middleware.error_handler import build_error_middleware
 
 
 @asynccontextmanager
@@ -80,6 +85,8 @@ def _register_routes(app: FastAPI, settings: Any) -> None:
     """Register API routes."""
     prefix = settings.server.api_prefix
 
+    _register_mcp_routes(app)
+
     # Health routes (no prefix for standard health checks)
     app.include_router(health.router, tags=["Health"])
 
@@ -88,6 +95,31 @@ def _register_routes(app: FastAPI, settings: Any) -> None:
     app.include_router(query.router, prefix=prefix, tags=["Query"])
     app.include_router(sources.router, prefix=prefix, tags=["Sources"])
     app.include_router(videos.router, prefix=prefix, tags=["Videos"])
+
+
+def _register_mcp_routes(app: FastAPI) -> None:
+    """Expose the MCP server over SSE on the same FastAPI app."""
+    mcp_server = create_mcp_server()
+    sse_transport = SseServerTransport("/messages")
+
+    async def handle_sse(scope: Scope, receive: Receive, send: Send) -> Response:
+        async with sse_transport.connect_sse(scope, receive, send) as streams:
+            await mcp_server.run(
+                streams[0],
+                streams[1],
+                mcp_server.create_initialization_options(),
+            )
+        return Response()
+
+    async def sse_endpoint(request: Request) -> Response:
+        return await handle_sse(
+            request.scope,
+            request.receive,
+            request._send,
+        )
+
+    app.add_api_route("/sse", sse_endpoint, methods=["GET"], include_in_schema=False)
+    app.mount("/messages", sse_transport.handle_post_message, name="mcp-messages")
 
 
 # Create default app instance
