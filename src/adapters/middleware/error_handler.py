@@ -1,6 +1,10 @@
 """Domain-specific error handlers for the YouTube MCP skill."""
 
-from orchid_commons import APIError, ErrorResponse, create_fastapi_error_middleware
+from collections.abc import Awaitable, Callable
+from typing import TypeAlias
+
+from fastapi import Request, Response
+from orchid_commons import ErrorResponse, create_fastapi_error_middleware
 
 from src.application.services.ingestion import IngestionError
 from src.domain.exceptions import (
@@ -11,6 +15,11 @@ from src.domain.exceptions import (
     VideoNotFoundException,
     VideoNotReadyException,
 )
+
+HTTPMiddleware: TypeAlias = Callable[
+    [Request, Callable[[Request], Awaitable[Response]]],
+    Awaitable[Response],
+]
 
 
 def _handle_invalid_youtube_url(exc: Exception) -> ErrorResponse:
@@ -74,7 +83,7 @@ def _handle_domain_exception(exc: Exception) -> ErrorResponse:
     return ErrorResponse(code="DOMAIN_ERROR", message=str(exc), status_code=400)
 
 
-def build_error_middleware():
+def build_error_middleware() -> HTTPMiddleware:
     """Create the error-handling middleware with all YouTube domain handlers."""
     handlers = [
         (InvalidYouTubeUrlException, _handle_invalid_youtube_url),
