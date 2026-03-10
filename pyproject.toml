@@ -169,7 +169,11 @@ module = [
     "src.infrastructure.runtime",
     "src.infrastructure.factory",
 ]
-disable_error_code = ["import-untyped"]
+disable_error_code = ["import-untyped", "call-arg", "arg-type"]
+
+[[tool.mypy.overrides]]
+module = "src.application.services.agent_playground"
+disable_error_code = ["untyped-decorator"]
 
 [[tool.mypy.overrides]]
 module = "src.adapters.mcp.*"

@@ -179,11 +179,11 @@ async def init_services(
     # Pre-initialize critical services to fail fast
     factory.get_blob_storage()
     factory.get_vector_db()
-    factory.get_document_db()
+    document_db = factory.get_document_db()
 
     auth_logger = get_logger(__name__)
     youtube_auth_service = YouTubeAuthService(
-        document_db=factory.get_document_db(),
+        document_db=document_db,
         factory=factory,
         settings=settings,
     )

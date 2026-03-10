@@ -107,15 +107,16 @@ class VideoAgentPlaygroundService:
                     "include_reasoning": include_reasoning,
                 }
                 result = await mcp_tool.call_tool("query_video", **payload)
+                result_text = str(result)
                 tool_traces.append(
                     AgentToolTrace(
                         tool_name="query_selected_video",
                         mcp_tool_name="query_video",
                         arguments=payload,
-                        result_preview=_truncate(result),
+                        result_preview=_truncate(result_text),
                     )
                 )
-                return result
+                return result_text
 
             @bindings.tool(
                 name="get_selected_sources",
@@ -141,15 +142,16 @@ class VideoAgentPlaygroundService:
                     ],
                 }
                 result = await mcp_tool.call_tool("get_sources", **payload)
+                result_text = str(result)
                 tool_traces.append(
                     AgentToolTrace(
                         tool_name="get_selected_sources",
                         mcp_tool_name="get_sources",
                         arguments=payload,
-                        result_preview=_truncate(result),
+                        result_preview=_truncate(result_text),
                     )
                 )
-                return result
+                return result_text
 
             @bindings.tool(
                 name="get_selected_video_status",
@@ -160,15 +162,16 @@ class VideoAgentPlaygroundService:
             async def get_selected_video_status() -> str:
                 payload = {"video_id": video.id}
                 result = await mcp_tool.call_tool("get_ingestion_status", **payload)
+                result_text = str(result)
                 tool_traces.append(
                     AgentToolTrace(
                         tool_name="get_selected_video_status",
                         mcp_tool_name="get_ingestion_status",
                         arguments=payload,
-                        result_preview=_truncate(result),
+                        result_preview=_truncate(result_text),
                     )
                 )
-                return result
+                return result_text
 
             agent = bindings.Agent(
                 client=client,

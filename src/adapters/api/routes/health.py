@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
@@ -97,7 +97,7 @@ async def _runtime_health_payload(*, include_optional_checks: bool) -> dict[str,
                 "Runtime health payload has invalid type",
                 details={"error_type": type(payload).__name__},
             )
-        return cast("dict[str, Any]", payload)
+        return payload
     except Exception as exc:
         return _unavailable_manager_payload(
             "Runtime health evaluation failed",

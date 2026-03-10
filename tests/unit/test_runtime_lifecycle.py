@@ -27,8 +27,8 @@ class TestRuntimeBootstrap:
         settings = MagicMock()
         settings.app.environment = "dev"
 
-        shared_settings = MagicMock()
         resource_settings = MagicMock()
+        shared_settings = MagicMock(resources=resource_settings)
         manager = AsyncMock()
 
         with (
@@ -36,10 +36,6 @@ class TestRuntimeBootstrap:
             patch(
                 "src.infrastructure.runtime.load_shared_app_settings",
                 return_value=shared_settings,
-            ),
-            patch(
-                "src.infrastructure.runtime.ResourceSettings.from_app_settings",
-                return_value=resource_settings,
             ),
             patch("src.infrastructure.runtime.ResourceManager", return_value=manager),
         ):
@@ -59,8 +55,8 @@ class TestRuntimeBootstrap:
         settings = MagicMock()
         settings.app.environment = "dev"
 
-        shared_settings = MagicMock()
         resource_settings = MagicMock()
+        shared_settings = MagicMock(resources=resource_settings)
         manager = AsyncMock()
 
         with (
@@ -68,10 +64,6 @@ class TestRuntimeBootstrap:
             patch(
                 "src.infrastructure.runtime.load_shared_app_settings",
                 return_value=shared_settings,
-            ),
-            patch(
-                "src.infrastructure.runtime.ResourceSettings.from_app_settings",
-                return_value=resource_settings,
             ),
             patch("src.infrastructure.runtime.ResourceManager", return_value=manager),
         ):
@@ -93,8 +85,10 @@ class TestDependencyLifecycle:
         settings = MagicMock()
         manager = MagicMock()
         runtime_state = SimpleNamespace(manager=manager)
-
         factory = MagicMock()
+        document_db = AsyncMock()
+        document_db.find_by_id.return_value = None
+        factory.get_document_db.return_value = document_db
 
         with (
             patch(
@@ -129,6 +123,9 @@ class TestDependencyLifecycle:
         manager = MagicMock()
         runtime_state = SimpleNamespace(manager=manager)
         factory = MagicMock()
+        document_db = AsyncMock()
+        document_db.find_by_id.return_value = None
+        factory.get_document_db.return_value = document_db
 
         with (
             patch(

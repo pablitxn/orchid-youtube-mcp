@@ -27,13 +27,10 @@ def load_agent_framework_bindings() -> AgentFrameworkBindings:
     """
     from mcp.client import streamable_http
 
-    if (
-        not hasattr(streamable_http, "streamable_http_client")
-        and hasattr(streamable_http, "streamablehttp_client")
-    ):
-        streamable_http.streamable_http_client = (  # type: ignore[attr-defined]
-            streamable_http.streamablehttp_client
-        )
+    replacement = getattr(streamable_http, "streamablehttp_client", None)
+    if not hasattr(streamable_http, "streamable_http_client") and callable(replacement):
+        streamable_http_any: Any = streamable_http
+        streamable_http_any.streamable_http_client = replacement
 
     from agent_framework import Agent, MCPStdioTool, Message, tool
     from agent_framework.openai import OpenAIResponsesClient

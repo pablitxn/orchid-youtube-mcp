@@ -10,15 +10,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v7.4.0
         with:
           version: "latest"
 
@@ -38,10 +41,10 @@ jobs:
     name: Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v7.4.0
         with:
           version: "latest"
 
@@ -58,10 +61,10 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v7.4.0
         with:
           version: "latest"
 
@@ -75,7 +78,7 @@ jobs:
         run: uv run pytest -m "not integration and not e2e" --cov-fail-under=0
 
       - name: Upload coverage reports
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
@@ -84,19 +87,9 @@ jobs:
   integration-test:
     name: Integration Test
     runs-on: ubuntu-latest
-    if: contains(github.event.pull_request.labels.*.name, 'run-integration')
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-integration')
     needs: [lint, type-check, test]
     services:
-      minio:
-        image: minio/minio:latest
-        options: --health-cmd "mc ready local" --health-interval 10s --health-timeout 5s --health-retries 5 --entrypoint ""
-        command: server /data
-        ports:
-          - 9000:9000
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-
       qdrant:
         image: qdrant/qdrant:latest
         ports:
@@ -111,10 +104,10 @@ jobs:
           MONGO_INITDB_ROOT_PASSWORD: admin
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v7.4.0
         with:
           version: "latest"
 
@@ -124,12 +117,31 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+
+      - name: Wait for MinIO
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs minio
+          exit 1
+
       - name: Run integration tests
         run: uv run pytest -m integration --cov-fail-under=0
         env:
-          YOUTUBE_RAG__BLOB__ENDPOINT: http://localhost:9000
-          YOUTUBE_RAG__BLOB__ACCESS_KEY: minioadmin
-          YOUTUBE_RAG__BLOB__SECRET_KEY: minioadmin
-          YOUTUBE_RAG__VECTORDB__HOST: localhost
-          YOUTUBE_RAG__VECTORDB__PORT: 6333
-          YOUTUBE_RAG__DOCUMENTDB__URI: mongodb://admin:admin@localhost:27017
+          YOUTUBE_MCP_IT_MINIO_ENDPOINT: 127.0.0.1:9000
+          YOUTUBE_MCP_IT_MINIO_ACCESS_KEY: minioadmin
+          YOUTUBE_MCP_IT_MINIO_SECRET_KEY: minioadmin
+          YOUTUBE_MCP_IT_QDRANT_HOST: 127.0.0.1
+          YOUTUBE_MCP_IT_QDRANT_PORT: 6333
+          YOUTUBE_MCP_IT_MONGODB_URI: mongodb://admin:admin@127.0.0.1:27017/?authSource=admin
