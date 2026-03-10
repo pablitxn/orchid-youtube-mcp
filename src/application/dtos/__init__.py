@@ -29,6 +29,11 @@ from src.application.dtos.query import (
     ToolCall,
     VideoResult,
 )
+from src.application.dtos.youtube_auth import (
+    ManagedYouTubeCookie,
+    YouTubeAuthMode,
+    YouTubeAuthStatus,
+)
 
 __all__ = [
     "AgentChatMessageInput",
@@ -56,4 +61,8 @@ __all__ = [
     "SubTaskInfo",
     "ToolCall",
     "VideoResult",
+    # YouTube auth DTOs
+    "ManagedYouTubeCookie",
+    "YouTubeAuthMode",
+    "YouTubeAuthStatus",
 ]

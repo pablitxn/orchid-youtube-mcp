@@ -81,6 +81,7 @@ class DocumentCollectionSettings(BaseModel):
     audio_chunks: str = "audio_chunks"
     video_chunks: str = "video_chunks"
     citations: str = "citations"
+    app_state: str = "app_state"
 
 
 class DocumentDBSettings(BaseModel):
@@ -316,6 +317,14 @@ class YouTubeSettings(BaseModel):
     ) = Field(
         default=None,
         description="Browser to extract cookies from (e.g., 'chrome', 'firefox')",
+    )
+    managed_cookies_file: str = Field(
+        default="/tmp/youtube-mcp/cookies.txt",
+        description="Runtime path for the app-managed yt-dlp cookies.txt file",
+    )
+    managed_cookies_encryption_key: str | None = Field(
+        default=None,
+        description="Fernet key used to encrypt the managed yt-dlp cookies.txt",
     )
     proxy: str | None = Field(
         default=None,

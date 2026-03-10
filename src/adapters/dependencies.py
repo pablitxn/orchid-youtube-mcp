@@ -9,6 +9,7 @@ from src.application.services.agent_playground import VideoAgentPlaygroundServic
 from src.application.services.ingestion import VideoIngestionService
 from src.application.services.query import VideoQueryService
 from src.application.services.storage import VideoStorageService
+from src.application.services.youtube_auth import YouTubeAuthService
 from src.infrastructure.factory import (
     InfrastructureFactory,
     get_factory,
@@ -24,6 +25,7 @@ from src.infrastructure.runtime import (
 )
 from src.infrastructure.settings.loader import get_settings as _load_settings
 from src.infrastructure.settings.models import Settings
+from src.infrastructure.telemetry import get_logger
 
 
 @lru_cache
@@ -123,6 +125,18 @@ def get_agent_playground_service(
     )
 
 
+def get_youtube_auth_service(
+    factory: Annotated[InfrastructureFactory, Depends(get_infrastructure_factory)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> YouTubeAuthService:
+    """Get the managed YouTube auth service."""
+    return YouTubeAuthService(
+        document_db=factory.get_document_db(),
+        factory=factory,
+        settings=settings,
+    )
+
+
 # Type aliases for cleaner route signatures
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 FactoryDep = Annotated[InfrastructureFactory, Depends(get_infrastructure_factory)]
@@ -132,6 +146,10 @@ StorageServiceDep = Annotated[VideoStorageService, Depends(get_storage_service)]
 AgentPlaygroundServiceDep = Annotated[
     VideoAgentPlaygroundService,
     Depends(get_agent_playground_service),
+]
+YouTubeAuthServiceDep = Annotated[
+    YouTubeAuthService,
+    Depends(get_youtube_auth_service),
 ]
 
 
@@ -162,6 +180,21 @@ async def init_services(
     factory.get_blob_storage()
     factory.get_vector_db()
     factory.get_document_db()
+
+    auth_logger = get_logger(__name__)
+    youtube_auth_service = YouTubeAuthService(
+        document_db=factory.get_document_db(),
+        factory=factory,
+        settings=settings,
+    )
+    try:
+        await youtube_auth_service.bootstrap_runtime_cookie_file()
+    except Exception:
+        auth_logger.warning(
+            "Managed YouTube cookie bootstrap failed; "
+            "falling back to static auth config",
+            exc_info=True,
+        )
 
 
 async def shutdown_services() -> None:

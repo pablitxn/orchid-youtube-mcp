@@ -7,8 +7,14 @@ from fastapi import APIRouter, Query, status
 from orchid_commons import APIError
 from pydantic import BaseModel, Field
 
-from src.adapters.dependencies import FactoryDep, SettingsDep, StorageServiceDep
+from src.adapters.dependencies import (
+    FactoryDep,
+    SettingsDep,
+    StorageServiceDep,
+    YouTubeAuthServiceDep,
+)
 from src.application.dtos.ingestion import IngestionStatus
+from src.application.dtos.youtube_auth import YouTubeAuthStatus
 from src.application.services.storage import VideoStorageService
 from src.domain.models.chunk import (
     AudioChunk,
@@ -138,6 +144,21 @@ class AdminChunksResponse(BaseModel):
     )
     pagination: ChunkPaginationResponse = Field(description="Pagination metadata")
     chunks: list[AdminChunkResponse] = Field(description="Chunk list")
+
+
+class UpdateYouTubeCookieRequest(BaseModel):
+    """Request model for saving a managed yt-dlp cookies.txt."""
+
+    cookie_text: str = Field(
+        min_length=1,
+        max_length=200_000,
+        description="Full Netscape cookies.txt export content",
+    )
+    source_label: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Optional operator label for the pasted cookie",
+    )
 
 
 @router.get(
@@ -303,6 +324,62 @@ async def get_admin_video_chunks(
             await _build_chunk_response(storage, video, chunk) for chunk in paged_chunks
         ],
     )
+
+
+@router.get(
+    "/admin/youtube-auth",
+    response_model=YouTubeAuthStatus,
+    summary="Get YouTube auth status",
+    description="Inspect the managed yt-dlp cookie state used for downloads.",
+)
+async def get_youtube_auth_status(
+    service: YouTubeAuthServiceDep,
+) -> YouTubeAuthStatus:
+    """Get the current managed YouTube auth status."""
+    return await service.get_status()
+
+
+@router.put(
+    "/admin/youtube-auth/cookie",
+    response_model=YouTubeAuthStatus,
+    summary="Save managed YouTube cookie",
+    description="Persist an encrypted yt-dlp cookies.txt export for downloads.",
+)
+async def save_youtube_cookie(
+    request: UpdateYouTubeCookieRequest,
+    service: YouTubeAuthServiceDep,
+) -> YouTubeAuthStatus:
+    """Save an encrypted managed yt-dlp cookie."""
+    try:
+        return await service.save_cookie(
+            cookie_text=request.cookie_text,
+            source_label=request.source_label,
+        )
+    except ValueError as exc:
+        raise APIError(
+            code="INVALID_YOUTUBE_COOKIE",
+            message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        ) from exc
+    except RuntimeError as exc:
+        raise APIError(
+            code="YOUTUBE_COOKIE_UNAVAILABLE",
+            message=str(exc),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        ) from exc
+
+
+@router.delete(
+    "/admin/youtube-auth/cookie",
+    response_model=YouTubeAuthStatus,
+    summary="Clear managed YouTube cookie",
+    description="Delete the managed encrypted cookie and restore fallback auth.",
+)
+async def clear_youtube_cookie(
+    service: YouTubeAuthServiceDep,
+) -> YouTubeAuthStatus:
+    """Clear the managed yt-dlp cookie."""
+    return await service.clear_cookie()
 
 
 def _to_ingestion_status(video_status: VideoStatus) -> IngestionStatus:

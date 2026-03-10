@@ -20,6 +20,10 @@ from src.application.dtos.query import (
     SourcesResponse,
     TimestampRangeDTO,
 )
+from src.application.dtos.youtube_auth import (
+    YouTubeAuthMode,
+    YouTubeAuthStatus,
+)
 from src.domain.models.chunk import TranscriptChunk
 from src.domain.models.video import VideoMetadata, VideoStatus
 
@@ -40,6 +44,7 @@ def mock_settings():
     settings.document_db.collections.frame_chunks = "frame_chunks"
     settings.document_db.collections.audio_chunks = "audio_chunks"
     settings.document_db.collections.video_chunks = "video_chunks"
+    settings.document_db.collections.app_state = "app_state"
     settings.document_db.provider = "mongodb"
     settings.vector_db.collections.transcripts = "transcripts"
     settings.vector_db.provider = "qdrant"
@@ -102,6 +107,27 @@ def mock_agent_playground_service():
 
 
 @pytest.fixture
+def mock_youtube_auth_service():
+    """Create mock YouTube auth service."""
+    service = AsyncMock()
+    service.get_status.return_value = YouTubeAuthStatus(
+        mode=YouTubeAuthMode.NONE,
+        encryption_configured=True,
+        has_managed_cookie=False,
+        source_label=None,
+        updated_at=None,
+        runtime_file_present=False,
+        configured_cookies_file=None,
+        configured_browser=None,
+        cookie_line_count=0,
+        domain_count=0,
+        contains_youtube_domains=False,
+        has_login_cookie_names=False,
+    )
+    return service
+
+
+@pytest.fixture
 def client(
     mock_settings,
     mock_factory,
@@ -109,6 +135,7 @@ def client(
     mock_query_service,
     mock_storage_service,
     mock_agent_playground_service,
+    mock_youtube_auth_service,
 ):
     """Create test client with mocked dependencies."""
     from src.adapters.dependencies import (
@@ -118,6 +145,7 @@ def client(
         get_query_service,
         get_settings,
         get_storage_service,
+        get_youtube_auth_service,
     )
 
     with (
@@ -134,6 +162,9 @@ def client(
         app.dependency_overrides[get_storage_service] = lambda: mock_storage_service
         app.dependency_overrides[get_agent_playground_service] = (
             lambda: mock_agent_playground_service
+        )
+        app.dependency_overrides[get_youtube_auth_service] = (
+            lambda: mock_youtube_auth_service
         )
         yield TestClient(app, raise_server_exceptions=False)
 
@@ -539,6 +570,86 @@ class TestAdminRoutes:
         data = response.json()
         assert data["pagination"]["total_items"] == 1
         assert data["chunks"][0]["id"] == "chunk-1"
+
+    def test_get_youtube_auth_status(self, client, mock_youtube_auth_service):
+        """Test fetching managed YouTube auth status."""
+        mock_youtube_auth_service.get_status.return_value = YouTubeAuthStatus(
+            mode=YouTubeAuthMode.MANAGED_COOKIE,
+            encryption_configured=True,
+            has_managed_cookie=True,
+            source_label="utility account",
+            updated_at=datetime.now(UTC),
+            runtime_file_present=True,
+            configured_cookies_file=None,
+            configured_browser=None,
+            cookie_line_count=24,
+            domain_count=2,
+            contains_youtube_domains=True,
+            has_login_cookie_names=True,
+        )
+
+        response = client.get("/v1/admin/youtube-auth")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["mode"] == "managed_cookie"
+        assert data["cookie_line_count"] == 24
+
+    def test_save_youtube_cookie(self, client, mock_youtube_auth_service):
+        """Test saving managed YouTube cookie content."""
+        mock_youtube_auth_service.save_cookie.return_value = YouTubeAuthStatus(
+            mode=YouTubeAuthMode.MANAGED_COOKIE,
+            encryption_configured=True,
+            has_managed_cookie=True,
+            source_label="utility account",
+            updated_at=datetime.now(UTC),
+            runtime_file_present=True,
+            configured_cookies_file=None,
+            configured_browser=None,
+            cookie_line_count=24,
+            domain_count=2,
+            contains_youtube_domains=True,
+            has_login_cookie_names=True,
+        )
+
+        response = client.put(
+            "/v1/admin/youtube-auth/cookie",
+            json={
+                "cookie_text": (
+                    "# Netscape HTTP Cookie File\n"
+                    ".youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret\n"
+                ),
+                "source_label": "utility account",
+            },
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["has_managed_cookie"] is True
+        assert data["source_label"] == "utility account"
+
+    def test_clear_youtube_cookie(self, client, mock_youtube_auth_service):
+        """Test clearing the managed YouTube cookie."""
+        mock_youtube_auth_service.clear_cookie.return_value = YouTubeAuthStatus(
+            mode=YouTubeAuthMode.NONE,
+            encryption_configured=True,
+            has_managed_cookie=False,
+            source_label=None,
+            updated_at=None,
+            runtime_file_present=False,
+            configured_cookies_file=None,
+            configured_browser=None,
+            cookie_line_count=0,
+            domain_count=0,
+            contains_youtube_domains=False,
+            has_login_cookie_names=False,
+        )
+
+        response = client.delete("/v1/admin/youtube-auth/cookie")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["mode"] == "none"
 
 
 class TestAgentRoutes:

@@ -268,6 +268,10 @@ button {
   padding: 24px;
 }
 
+.auth-panel {
+  padding: 24px;
+}
+
 .section-heading {
   display: flex;
   align-items: flex-start;
@@ -319,6 +323,12 @@ button {
   resize: vertical;
 }
 
+.textarea-mono {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .field-row,
 .toolbar,
 .pill-row,
@@ -343,6 +353,18 @@ button {
   display: grid;
   gap: 12px;
   margin: 16px 0;
+}
+
+.auth-form {
+  display: grid;
+  gap: 16px;
+}
+
+.panel-copy,
+.helper-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
 }
 
 .toggle-field {
