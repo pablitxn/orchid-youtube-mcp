@@ -108,6 +108,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 14px;
+  min-width: 0;
   color: var(--ink);
 }
 
@@ -200,6 +201,7 @@ button {
   max-width: 72ch;
   color: var(--muted);
   line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .hero.compact h1 {
@@ -327,6 +329,7 @@ button {
 .toolbar-field {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .field span {
@@ -375,6 +378,12 @@ button {
 .field-row {
   margin-top: 14px;
   align-items: start;
+}
+
+.pill-row,
+.toolbar-actions,
+.artifact-list {
+  align-items: flex-start;
 }
 
 .field-row > * {
@@ -469,6 +478,7 @@ button {
 .answer-card {
   display: grid;
   gap: 14px;
+  min-width: 0;
   padding: 18px;
   border: 1px solid rgba(24, 53, 69, 0.1);
   border-radius: var(--radius-lg);
@@ -508,6 +518,7 @@ button {
   display: grid;
   gap: 12px;
   width: 100%;
+  min-width: 0;
   padding: 16px;
   border: 1px solid rgba(24, 53, 69, 0.1);
   border-radius: var(--radius-lg);
@@ -648,6 +659,7 @@ button {
 .player-meta {
   display: grid;
   gap: 18px;
+  min-width: 0;
 }
 
 .ghost-link {
@@ -716,6 +728,7 @@ video {
   margin-bottom: 0;
   color: var(--muted);
   line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .artifact-link {
@@ -733,6 +746,7 @@ video {
 .inline-error {
   padding: 14px 16px;
   border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
 }
 
 .state-message {
@@ -764,6 +778,7 @@ video {
 .chat-bubble {
   display: grid;
   gap: 12px;
+  min-width: 0;
   padding: 16px;
   border-radius: var(--radius-lg);
   border: 1px solid rgba(24, 53, 69, 0.1);
@@ -796,6 +811,7 @@ video {
 .trace-card {
   display: grid;
   gap: 10px;
+  min-width: 0;
   padding: 14px;
   border-radius: var(--radius-md);
   background: rgba(255, 251, 245, 0.82);
@@ -821,6 +837,11 @@ video {
 @media (max-width: 960px) {
   .app-shell {
     padding: 16px;
+  }
+
+  .topnav {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .topbar,
@@ -856,6 +877,17 @@ video {
 }
 
 @media (max-width: 640px) {
+  .topbar,
+  .detail-toolbar,
+  .video-card-head,
+  .chunk-card-head,
+  .citation-head,
+  .detail-heading,
+  .section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .topnav,
   .toolbar,
   .field-row,
@@ -876,6 +908,11 @@ video {
   .filter-chip {
     width: 100%;
     justify-content: center;
+  }
+
+  .mono-tag,
+  .status-pill {
+    align-self: flex-start;
   }
 
   .summary-grid,
