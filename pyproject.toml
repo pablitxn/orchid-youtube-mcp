@@ -215,7 +215,7 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-orchid-mcp-commons = { git = "https://github.com/pablitxn/orchid-skills-commons.git" }
+orchid-mcp-commons = { git = "https://github.com/pablitxn/orchid-skills-commons.git", rev = "707cf637a084bda4f440238b0313afcf2963c939" }
 
 [dependency-groups]
 dev = [

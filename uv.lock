@@ -2043,7 +2043,7 @@ wheels = [
 [[package]]
 name = "orchid-mcp-commons"
 version = "0.1.0"
-source = { git = "https://github.com/pablitxn/orchid-skills-commons.git#0a3c9b021a1f257956eabc99af1c1494015636f4" }
+source = { git = "https://github.com/pablitxn/orchid-skills-commons.git?rev=707cf637a084bda4f440238b0313afcf2963c939#707cf637a084bda4f440238b0313afcf2963c939" }
 dependencies = [
     { name = "pydantic" },
 ]
@@ -3726,7 +3726,7 @@ requires-dist = [
     { name = "motor", specifier = ">=3.6.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
     { name = "openai", specifier = ">=1.55.0" },
-    { name = "orchid-mcp-commons", extras = ["blob", "db", "observability"], git = "https://github.com/pablitxn/orchid-skills-commons.git" },
+    { name = "orchid-mcp-commons", extras = ["blob", "db", "observability"], git = "https://github.com/pablitxn/orchid-skills-commons.git?rev=707cf637a084bda4f440238b0313afcf2963c939" },
     { name = "pillow", specifier = ">=11.0.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pydantic", specifier = ">=2.0" },
