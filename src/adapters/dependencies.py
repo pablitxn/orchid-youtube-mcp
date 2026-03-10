@@ -192,7 +192,7 @@ async def init_services(
     except Exception:
         auth_logger.warning(
             "Managed YouTube cookie bootstrap failed; "
-            "falling back to static auth config",
+            "authenticated downloads are disabled until the cookie is fixed",
             exc_info=True,
         )
 

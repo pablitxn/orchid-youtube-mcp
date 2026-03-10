@@ -307,17 +307,6 @@ class ProcessingSettings(BaseModel):
 class YouTubeSettings(BaseModel):
     """YouTube downloader settings."""
 
-    cookies_file: str | None = Field(
-        default=None,
-        description="Path to cookies.txt file for authenticated downloads",
-    )
-    cookies_from_browser: (
-        Literal["chrome", "firefox", "edge", "safari", "opera", "brave", "chromium"]
-        | None
-    ) = Field(
-        default=None,
-        description="Browser to extract cookies from (e.g., 'chrome', 'firefox')",
-    )
     managed_cookies_file: str = Field(
         default="/tmp/youtube-mcp/cookies.txt",
         description="Runtime path for the app-managed yt-dlp cookies.txt file",

@@ -14,7 +14,10 @@ from src.adapters.dependencies import (
     YouTubeAuthServiceDep,
 )
 from src.application.dtos.ingestion import IngestionStatus
-from src.application.dtos.youtube_auth import YouTubeAuthStatus
+from src.application.dtos.youtube_auth import (
+    YouTubeAuthStatus,
+    YouTubeDownloadTestResult,
+)
 from src.application.services.storage import VideoStorageService
 from src.domain.models.chunk import (
     AudioChunk,
@@ -25,6 +28,7 @@ from src.domain.models.chunk import (
     VideoChunk,
 )
 from src.domain.models.video import VideoMetadata, VideoStatus
+from src.infrastructure.youtube.downloader import DownloadError, VideoNotFoundError
 
 router = APIRouter()
 
@@ -158,6 +162,16 @@ class UpdateYouTubeCookieRequest(BaseModel):
         default=None,
         max_length=120,
         description="Optional operator label for the pasted cookie",
+    )
+
+
+class YouTubeDownloadTestRequest(BaseModel):
+    """Request model for running an ephemeral yt-dlp download diagnostic."""
+
+    youtube_url: str = Field(
+        min_length=1,
+        description="YouTube URL to test with the currently active auth state",
+        examples=["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
     )
 
 
@@ -373,13 +387,51 @@ async def save_youtube_cookie(
     "/admin/youtube-auth/cookie",
     response_model=YouTubeAuthStatus,
     summary="Clear managed YouTube cookie",
-    description="Delete the managed encrypted cookie and restore fallback auth.",
+    description=(
+        "Delete the managed encrypted cookie and disable authenticated downloads."
+    ),
 )
 async def clear_youtube_cookie(
     service: YouTubeAuthServiceDep,
 ) -> YouTubeAuthStatus:
     """Clear the managed yt-dlp cookie."""
     return await service.clear_cookie()
+
+
+@router.post(
+    "/admin/youtube-auth/download-test",
+    response_model=YouTubeDownloadTestResult,
+    summary="Run YouTube download diagnostic",
+    description=(
+        "Attempt an ephemeral audio-only yt-dlp download using the currently "
+        "active managed cookie state. Nothing is indexed or persisted."
+    ),
+)
+async def run_youtube_download_test(
+    request: YouTubeDownloadTestRequest,
+    service: YouTubeAuthServiceDep,
+) -> YouTubeDownloadTestResult:
+    """Run an ephemeral yt-dlp download diagnostic."""
+    try:
+        return await service.test_download(youtube_url=request.youtube_url)
+    except ValueError as exc:
+        raise APIError(
+            code="INVALID_YOUTUBE_URL",
+            message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        ) from exc
+    except VideoNotFoundError as exc:
+        raise APIError(
+            code="YOUTUBE_VIDEO_NOT_FOUND",
+            message=str(exc),
+            status_code=status.HTTP_404_NOT_FOUND,
+        ) from exc
+    except DownloadError as exc:
+        raise APIError(
+            code="YOUTUBE_DOWNLOAD_TEST_FAILED",
+            message=str(exc),
+            status_code=status.HTTP_502_BAD_GATEWAY,
+        ) from exc
 
 
 def _to_ingestion_status(video_status: VideoStatus) -> IngestionStatus:

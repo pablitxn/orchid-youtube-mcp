@@ -134,3 +134,14 @@ class TestDownloaderInit:
         assert downloader._cookies_file == Path("/tmp/cookies.txt")
         assert downloader._proxy == "http://proxy:8080"
         assert downloader._rate_limit == "1M"
+
+    def test_configure_auth(self):
+        """Test updating the managed cookie path."""
+        from pathlib import Path
+
+        downloader = YtDlpDownloader()
+        downloader.configure_auth(cookies_file=Path("/tmp/managed-cookies.txt"))
+        assert downloader._cookies_file == Path("/tmp/managed-cookies.txt")
+
+        downloader.configure_auth(cookies_file=None)
+        assert downloader._cookies_file is None

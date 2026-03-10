@@ -14,11 +14,13 @@ import {
   getYouTubeAuthStatus,
   ingestVideo,
   listVideos,
+  runYouTubeDownloadTest,
   saveYouTubeCookie,
   type IngestRequest,
   type OverviewResponse,
   type VideoSummary,
   type YouTubeAuthStatus,
+  type YouTubeDownloadTestResult,
 } from "../api";
 import {
   formatCompactNumber,
@@ -58,6 +60,13 @@ export function HomeView() {
   const [authSourceLabel, setAuthSourceLabel] = useState("utility account");
   const [authState, setAuthState] = useState<"idle" | "saving" | "clearing">("idle");
   const [authError, setAuthError] = useState<string | null>(null);
+  const [downloadTestUrl, setDownloadTestUrl] = useState("");
+  const [downloadTestState, setDownloadTestState] = useState<"idle" | "testing">(
+    "idle",
+  );
+  const [downloadTestError, setDownloadTestError] = useState<string | null>(null);
+  const [downloadTestResult, setDownloadTestResult] =
+    useState<YouTubeDownloadTestResult | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -178,6 +187,8 @@ export function HomeView() {
       });
       setAuthStatus(nextStatus);
       setAuthText("");
+      setDownloadTestError(null);
+      setDownloadTestResult(null);
     } catch (failure) {
       setAuthError(
         failure instanceof Error
@@ -196,6 +207,8 @@ export function HomeView() {
     try {
       const nextStatus = await clearYouTubeCookie();
       setAuthStatus(nextStatus);
+      setDownloadTestError(null);
+      setDownloadTestResult(null);
     } catch (failure) {
       setAuthError(
         failure instanceof Error
@@ -225,6 +238,28 @@ export function HomeView() {
     };
     reader.readAsText(file);
     event.target.value = "";
+  }
+
+  async function handleDownloadTest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setDownloadTestState("testing");
+    setDownloadTestError(null);
+    setDownloadTestResult(null);
+
+    try {
+      const result = await runYouTubeDownloadTest({
+        youtube_url: downloadTestUrl.trim(),
+      });
+      setDownloadTestResult(result);
+    } catch (failure) {
+      setDownloadTestError(
+        failure instanceof Error
+          ? failure.message
+          : "Could not run the yt-dlp download diagnostic.",
+      );
+    } finally {
+      setDownloadTestState("idle");
+    }
   }
 
   return (
@@ -378,9 +413,9 @@ export function HomeView() {
               </label>
 
               <p className="helper-copy">
-                Managed cookies take precedence over any static server-side fallback.
-                Clearing them restores the configured file or browser mode if one
-                exists.
+                This is now the only authenticated-download path. Clearing it turns
+                the app back into anonymous YouTube access until you paste a fresh
+                export.
               </p>
 
               {authError !== null ? <p className="inline-error">{authError}</p> : null}
@@ -409,6 +444,106 @@ export function HomeView() {
                 </button>
               </div>
             </form>
+          </section>
+
+          <section className="panel auth-panel">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Download diagnostic</p>
+                <h2>Try a real yt-dlp fetch</h2>
+              </div>
+              <span className="mono-tag">POST /v1/admin/youtube-auth/download-test</span>
+            </div>
+
+            <p className="panel-copy">
+              Use this before ingesting from your Mac. The app downloads audio to a
+              temporary directory with the current auth state, inspects the result,
+              and deletes it immediately without indexing or storing media.
+            </p>
+
+            <form className="auth-form" onSubmit={handleDownloadTest}>
+              <label className="field">
+                <span>YouTube URL</span>
+                <input
+                  required
+                  type="url"
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  value={downloadTestUrl}
+                  onChange={(event) => setDownloadTestUrl(event.target.value)}
+                />
+              </label>
+
+              <div className="toolbar-actions">
+                <button
+                  type="submit"
+                  className="button primary"
+                  disabled={
+                    downloadTestState !== "idle" ||
+                    downloadTestUrl.trim().length === 0
+                  }
+                >
+                  {downloadTestState === "testing"
+                    ? "Testing download…"
+                    : "Run download diagnostic"}
+                </button>
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={formState.youtube_url.trim().length === 0}
+                  onClick={() => {
+                    setDownloadTestUrl(formState.youtube_url);
+                  }}
+                >
+                  Use ingest URL
+                </button>
+              </div>
+            </form>
+
+            {downloadTestError !== null ? (
+              <p className="inline-error">{downloadTestError}</p>
+            ) : null}
+
+            {downloadTestResult !== null ? (
+              <div className="state-message">
+                <div className="pill-row">
+                  <span
+                    className={`status-pill ${youtubeAuthTone(downloadTestResult.auth_mode)}`}
+                  >
+                    {formatYouTubeAuthMode(downloadTestResult.auth_mode)}
+                  </span>
+                  <span className="mono-tag">{downloadTestResult.artifact_name}</span>
+                </div>
+
+                <dl className="meta-grid spacious">
+                  <div>
+                    <dt>Title</dt>
+                    <dd>{downloadTestResult.title}</dd>
+                  </div>
+                  <div>
+                    <dt>Channel</dt>
+                    <dd>{downloadTestResult.channel_name}</dd>
+                  </div>
+                  <div>
+                    <dt>Duration</dt>
+                    <dd>{formatDuration(downloadTestResult.duration_seconds)}</dd>
+                  </div>
+                  <div>
+                    <dt>Downloaded</dt>
+                    <dd>{formatBytes(downloadTestResult.downloaded_bytes)}</dd>
+                  </div>
+                  <div>
+                    <dt>Elapsed</dt>
+                    <dd>{formatElapsed(downloadTestResult.elapsed_ms)}</dd>
+                  </div>
+                  <div>
+                    <dt>YouTube ID</dt>
+                    <dd>{downloadTestResult.youtube_id}</dd>
+                  </div>
+                </dl>
+
+                <p className="helper-copy">{downloadTestResult.note}</p>
+              </div>
+            ) : null}
           </section>
 
           <form className="panel form-panel" onSubmit={handleSubmit}>
@@ -628,11 +763,28 @@ function formatYouTubeAuthMode(mode: YouTubeAuthStatus["mode"]): string {
 function youtubeAuthTone(mode: YouTubeAuthStatus["mode"]): string {
   switch (mode) {
     case "managed_cookie":
-    case "static_file":
       return "success";
-    case "browser":
-      return "warning";
     default:
       return "neutral";
   }
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatElapsed(value: number): string {
+  if (value < 1000) {
+    return `${value} ms`;
+  }
+
+  return `${(value / 1000).toFixed(1)} s`;
 }

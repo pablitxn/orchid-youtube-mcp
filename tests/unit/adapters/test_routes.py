@@ -23,6 +23,7 @@ from src.application.dtos.query import (
 from src.application.dtos.youtube_auth import (
     YouTubeAuthMode,
     YouTubeAuthStatus,
+    YouTubeDownloadTestResult,
 )
 from src.domain.models.chunk import TranscriptChunk
 from src.domain.models.video import VideoMetadata, VideoStatus
@@ -117,8 +118,6 @@ def mock_youtube_auth_service():
         source_label=None,
         updated_at=None,
         runtime_file_present=False,
-        configured_cookies_file=None,
-        configured_browser=None,
         cookie_line_count=0,
         domain_count=0,
         contains_youtube_domains=False,
@@ -580,8 +579,6 @@ class TestAdminRoutes:
             source_label="utility account",
             updated_at=datetime.now(UTC),
             runtime_file_present=True,
-            configured_cookies_file=None,
-            configured_browser=None,
             cookie_line_count=24,
             domain_count=2,
             contains_youtube_domains=True,
@@ -604,8 +601,6 @@ class TestAdminRoutes:
             source_label="utility account",
             updated_at=datetime.now(UTC),
             runtime_file_present=True,
-            configured_cookies_file=None,
-            configured_browser=None,
             cookie_line_count=24,
             domain_count=2,
             contains_youtube_domains=True,
@@ -637,8 +632,6 @@ class TestAdminRoutes:
             source_label=None,
             updated_at=None,
             runtime_file_present=False,
-            configured_cookies_file=None,
-            configured_browser=None,
             cookie_line_count=0,
             domain_count=0,
             contains_youtube_domains=False,
@@ -650,6 +643,33 @@ class TestAdminRoutes:
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert data["mode"] == "none"
+
+    def test_run_youtube_download_test(self, client, mock_youtube_auth_service):
+        """Test the ephemeral yt-dlp download diagnostic route."""
+        mock_youtube_auth_service.test_download.return_value = (
+            YouTubeDownloadTestResult(
+                youtube_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                youtube_id="dQw4w9WgXcQ",
+                title="Never Gonna Give You Up",
+                channel_name="Rick Astley",
+                duration_seconds=213,
+                auth_mode=YouTubeAuthMode.MANAGED_COOKIE,
+                downloaded_bytes=1_048_576,
+                artifact_name="dQw4w9WgXcQ.mp3",
+                elapsed_ms=1820,
+                note="Deleted right after verification.",
+            )
+        )
+
+        response = client.post(
+            "/v1/admin/youtube-auth/download-test",
+            json={"youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["auth_mode"] == "managed_cookie"
+        assert data["downloaded_bytes"] == 1_048_576
 
 
 class TestAgentRoutes:

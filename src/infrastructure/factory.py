@@ -1,6 +1,4 @@
 """Infrastructure factory for creating service instances from configuration."""
-
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from orchid_commons import ResourceManager
@@ -176,12 +174,7 @@ class InfrastructureFactory:
         """
         if "youtube_downloader" not in self._instances:
             yt_settings = self._settings.youtube
-            cookies_file = (
-                Path(yt_settings.cookies_file) if yt_settings.cookies_file else None
-            )
             self._instances["youtube_downloader"] = YtDlpDownloader(
-                cookies_file=cookies_file,
-                cookies_from_browser=yt_settings.cookies_from_browser,
                 proxy=yt_settings.proxy,
                 rate_limit=yt_settings.rate_limit,
             )
