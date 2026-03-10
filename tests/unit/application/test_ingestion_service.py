@@ -418,6 +418,38 @@ class TestDuplicateDetection:
         mock_transcriber.transcribe.assert_called()
         assert result.status == IngestionStatus.COMPLETED
 
+    async def test_resume_clears_stale_error_message(
+        self, ingestion_service, mock_document_db, mock_blob_storage
+    ):
+        """Test that a resumed video clears an old failure message."""
+        existing = {
+            "id": "failed-uuid-123",
+            "youtube_id": "dQw4w9WgXcQ",
+            "youtube_url": "https://youtube.com/watch?v=dQw4w9WgXcQ",
+            "title": "Recovered Video",
+            "description": "Processing was resumed after a failure",
+            "duration_seconds": 120,
+            "channel_name": "Test Channel",
+            "channel_id": "UC123",
+            "upload_date": datetime.now(UTC).isoformat(),
+            "thumbnail_url": "https://example.com/thumb.jpg",
+            "status": VideoStatus.FAILED.value,
+            "blob_path_video": "failed-uuid-123/video.mp4",
+            "blob_path_audio": "failed-uuid-123/audio.mp3",
+            "error_message": "Previous failure",
+            "created_at": datetime.now(UTC),
+        }
+        mock_document_db.find_one.return_value = existing
+        mock_blob_storage.exists.return_value = True
+
+        request = IngestVideoRequest(url="https://youtube.com/watch?v=dQw4w9WgXcQ")
+        result = await ingestion_service.ingest(request)
+
+        assert result.status == IngestionStatus.COMPLETED
+        final_update = mock_document_db.update.await_args_list[-1].args[2]
+        assert final_update["status"] == VideoStatus.READY.value
+        assert final_update["error_message"] is None
+
 
 # =============================================================================
 # Test: Full Ingestion Pipeline
@@ -869,6 +901,7 @@ class TestVideoCRUD:
             "title": "Test Video",
             "duration_seconds": 120,
             "status": VideoStatus.READY.value,
+            "error_message": "Old failure that should be hidden",
             "transcript_chunk_count": 5,
             "frame_chunk_count": 10,
             "created_at": datetime.now(UTC),
@@ -879,6 +912,7 @@ class TestVideoCRUD:
         assert result is not None
         assert result.video_id == "video-1"
         assert result.status == IngestionStatus.COMPLETED
+        assert result.error_message is None
 
     async def test_get_ingestion_status_found_failed(
         self, ingestion_service, mock_document_db

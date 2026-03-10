@@ -282,7 +282,9 @@ async def get_admin_video_detail(
         channel_id=video.channel_id,
         thumbnail_url=video.thumbnail_url,
         language=video.language,
-        error_message=video.error_message,
+        error_message=(
+            video.error_message if video.status == VideoStatus.FAILED else None
+        ),
         artifacts=await _build_video_artifacts(storage, video),
     )
 
