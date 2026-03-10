@@ -642,6 +642,18 @@ class VideoIngestionService:
             return transitioned
         return transitioned.model_copy(update=updates)
 
+    @staticmethod
+    def _normalize_blob_path(blob: Any) -> str:
+        """Extract a blob path from either a plain string or blob-like object."""
+        if isinstance(blob, str):
+            return blob
+
+        path = getattr(blob, "path", None)
+        if isinstance(path, str):
+            return path
+
+        raise TypeError(f"Unsupported blob entry type: {type(blob)!r}")
+
     async def _mark_failed(self, video: VideoMetadata, error: str) -> None:
         """Mark video as failed."""
         failed_video = video.mark_failed(error)
@@ -663,7 +675,10 @@ class VideoIngestionService:
                 prefix=f"{video.id}/",
             )
             for blob in video_blobs:
-                await self._blob.delete(self._videos_bucket, blob.path)
+                await self._blob.delete(
+                    self._videos_bucket,
+                    self._normalize_blob_path(blob),
+                )
 
             # Delete blobs in frames bucket
             frame_blobs = await self._blob.list_blobs(
@@ -671,7 +686,10 @@ class VideoIngestionService:
                 prefix=f"{video.id}/",
             )
             for blob in frame_blobs:
-                await self._blob.delete(self._frames_bucket, blob.path)
+                await self._blob.delete(
+                    self._frames_bucket,
+                    self._normalize_blob_path(blob),
+                )
 
             # Delete blobs in chunks bucket (audio/video chunks)
             if await self._blob.bucket_exists(self._chunks_bucket):
@@ -680,7 +698,10 @@ class VideoIngestionService:
                     prefix=f"{video.id}/",
                 )
                 for blob in chunk_blobs:
-                    await self._blob.delete(self._chunks_bucket, blob.path)
+                    await self._blob.delete(
+                        self._chunks_bucket,
+                        self._normalize_blob_path(blob),
+                    )
 
             # Delete chunks from document DB
             await self._document_db.delete_many(
@@ -2260,7 +2281,7 @@ class VideoIngestionService:
 
         return await self._document_db.count(self._videos_collection, filters)
 
-    async def delete_video(self, video_id: str) -> bool:  # noqa: PLR0912
+    async def delete_video(self, video_id: str) -> bool:
         """Delete a video and all associated data.
 
         Removes all related data including:
@@ -2329,7 +2350,8 @@ class VideoIngestionService:
         ]:
             try:
                 blobs = await self._blob.list_blobs(bucket, prefix=f"{video_id}/")
-                for blob_path in blobs:
+                for blob in blobs:
+                    blob_path = self._normalize_blob_path(blob)
                     if await self._blob.delete(bucket, blob_path):
                         deleted_blobs += 1
             except Exception as e:
@@ -2360,96 +2382,3 @@ class VideoIngestionService:
         )
 
         return deleted_metadata
-        vector_collections = [
-            self._settings.vector_db.collections.transcripts,
-            self._settings.vector_db.collections.frames,
-            self._settings.vector_db.collections.videos,
-        ]
-        for collection in vector_collections:
-            try:
-                await self._vector_db.delete_by_filter(
-                    collection,
-                    {"video_id": video_id},
-                )
-                self._logger.debug(
-                    "Deleted embeddings from collection",
-                    extra={"video_id": video_id, "collection": collection},
-                )
-            except Exception as e:
-                self._logger.warning(
-                    "Failed to delete from vector collection",
-                    extra={
-                        "video_id": video_id,
-                        "collection": collection,
-                        "error": str(e),
-                    },
-                )
-
-        # Delete all chunk types from document DB
-        chunk_collections = [
-            self._chunks_collection,
-            self._frames_collection,
-            self._audio_chunks_collection,
-            self._video_chunks_collection,
-        ]
-        for collection in chunk_collections:
-            try:
-                await self._document_db.delete_many(
-                    collection,
-                    {"video_id": video_id},
-                )
-                self._logger.debug(
-                    "Deleted chunks from collection",
-                    extra={"video_id": video_id, "collection": collection},
-                )
-            except Exception as e:
-                self._logger.warning(
-                    "Failed to delete from chunk collection",
-                    extra={
-                        "video_id": video_id,
-                        "collection": collection,
-                        "error": str(e),
-                    },
-                )
-
-        # Delete blobs from all buckets
-        blob_buckets = [
-            self._videos_bucket,
-            self._frames_bucket,
-            self._chunks_bucket,
-        ]
-        for bucket in blob_buckets:
-            try:
-                blobs = await self._blob.list_blobs(
-                    bucket,
-                    prefix=f"{video_id}/",
-                )
-                for blob in blobs:
-                    await self._blob.delete(bucket, blob.path)
-                self._logger.debug(
-                    "Deleted blobs from bucket",
-                    extra={
-                        "video_id": video_id,
-                        "bucket": bucket,
-                        "blob_count": len(blobs),
-                    },
-                )
-            except Exception as e:
-                self._logger.warning(
-                    "Failed to delete blobs from bucket",
-                    extra={
-                        "video_id": video_id,
-                        "bucket": bucket,
-                        "error": str(e),
-                    },
-                )
-
-        # Delete video metadata document
-        deleted = await self._document_db.delete(self._videos_collection, video_id)
-
-        self._logger.info(
-            "Video deletion completed",
-            extra={"video_id": video_id, "success": deleted},
-        )
-
-        return deleted

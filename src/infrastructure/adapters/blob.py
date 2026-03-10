@@ -4,19 +4,46 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
-from typing import TYPE_CHECKING, BinaryIO, Literal, cast
+from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Protocol, cast
 
 from orchid_commons.blob import BlobNotFoundError, MultiBucketBlobRouter
 from orchid_commons.config.resources import MultiBucketSettings
 from orchid_commons.runtime.health import HealthStatus
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import AsyncIterator, Iterable, Mapping
     from pathlib import Path
 
     from orchid_commons.blob.s3 import S3BlobStorage
 
 _NOT_FOUND_CODES = {"NoSuchBucket", "NoSuchKey", "NotFound"}
+
+
+class _BlobObjectInfo(Protocol):
+    object_name: str
+
+
+class _ObjectResponse(Protocol):
+    def read(self, amt: int = -1) -> bytes: ...
+
+    def close(self) -> None: ...
+
+    def release_conn(self) -> None: ...
+
+
+class _S3ClientWithListing(Protocol):
+    def get_object(self, bucket_name: str, object_name: str) -> _ObjectResponse: ...
+
+    def list_objects(
+        self,
+        bucket_name: str,
+        prefix: str = "",
+        recursive: bool = False,
+    ) -> Iterable[_BlobObjectInfo]: ...
+
+    def bucket_exists(self, bucket_name: str) -> bool: ...
+
+    def make_bucket(self, bucket_name: str, location: str | None = None) -> Any: ...
 
 
 class BlobStorageAdapter:
@@ -114,7 +141,7 @@ class BlobStorageAdapter:
     async def download(self, bucket: str, path: str) -> bytes:
         alias = self._resolve_alias(bucket)
         result = await self._router.download(alias, path)
-        return cast("bytes", result.data)
+        return result.data
 
     async def download_stream(
         self,
@@ -125,7 +152,7 @@ class BlobStorageAdapter:
         alias = self._resolve_alias(bucket)
         storage = self._get_storage(alias)
         physical_bucket = storage.bucket
-        client = storage._client
+        client = cast("_S3ClientWithListing", storage._client)
 
         try:
             response = await asyncio.to_thread(client.get_object, physical_bucket, path)
@@ -171,7 +198,7 @@ class BlobStorageAdapter:
 
     async def exists(self, bucket: str, path: str) -> bool:
         alias = self._resolve_alias(bucket)
-        return cast("bool", await self._router.exists(alias, path))
+        return await self._router.exists(alias, path)
 
     async def generate_presigned_url(
         self,
@@ -190,14 +217,11 @@ class BlobStorageAdapter:
         else:
             raise ValueError("method must be GET or PUT")
 
-        return cast(
-            "str",
-            await self._router.presign(
-                alias,
-                path,
-                method=presign_method,
-                expires=timedelta(seconds=expiry_seconds),
-            ),
+        return await self._router.presign(
+            alias,
+            path,
+            method=presign_method,
+            expires=timedelta(seconds=expiry_seconds),
         )
 
     async def list_blobs(
@@ -209,7 +233,7 @@ class BlobStorageAdapter:
         alias = self._resolve_alias(bucket)
         storage = self._get_storage(alias)
         physical_bucket = storage.bucket
-        client = storage._client
+        client = cast("_S3ClientWithListing", storage._client)
 
         def _list() -> list[str]:
             results: list[str] = []
@@ -230,7 +254,7 @@ class BlobStorageAdapter:
         alias = self._resolve_alias(bucket)
         storage = self._get_storage(alias)
         physical_bucket = storage.bucket
-        client = storage._client
+        client = cast("_S3ClientWithListing", storage._client)
 
         if await asyncio.to_thread(client.bucket_exists, physical_bucket):
             return False

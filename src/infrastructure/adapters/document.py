@@ -165,7 +165,7 @@ class DocumentStoreAdapter:
         collection: str,
         document_id: str,
     ) -> bool:
-        deleted = await self._resource.delete_one(collection, {"_id": document_id})
+        deleted = int(await self._resource.delete_one(collection, {"_id": document_id}))
         if deleted > 0:
             return True
 
@@ -174,7 +174,7 @@ class DocumentStoreAdapter:
         except Exception:
             return False
 
-        deleted = await self._resource.delete_one(collection, {"_id": object_id})
+        deleted = int(await self._resource.delete_one(collection, {"_id": object_id}))
         return deleted > 0
 
     async def delete_many(
@@ -190,7 +190,7 @@ class DocumentStoreAdapter:
         collection: str,
         filters: dict[str, Any] | None = None,
     ) -> int:
-        return await self._resource.count(collection, filters or {})
+        return int(await self._resource.count(collection, filters or {}))
 
     async def create_index(
         self,

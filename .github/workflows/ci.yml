@@ -10,15 +10,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v7.4.0
         with:
           version: "latest"
 
@@ -38,10 +41,10 @@ jobs:
     name: Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v7.4.0
         with:
           version: "latest"
 
@@ -58,10 +61,10 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v7.4.0
         with:
           version: "latest"
 
@@ -75,7 +78,7 @@ jobs:
         run: uv run pytest -m "not integration and not e2e" --cov-fail-under=0
 
       - name: Upload coverage reports
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
@@ -84,7 +87,7 @@ jobs:
   integration-test:
     name: Integration Test
     runs-on: ubuntu-latest
-    if: contains(github.event.pull_request.labels.*.name, 'run-integration')
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-integration')
     needs: [lint, type-check, test]
     services:
       qdrant:
@@ -93,10 +96,10 @@ jobs:
           - 6333:6333
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v7.4.0
         with:
           version: "latest"
 
@@ -106,7 +109,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Start integration storage
+      - name: Start MinIO
         run: |
           ci_minio_access_key="ci$(openssl rand -hex 8)"
           ci_minio_secret_key="$(openssl rand -hex 20)"
@@ -128,8 +131,6 @@ jobs:
             -e MONGO_INITDB_ROOT_USERNAME="$ci_mongo_username" \
             -e MONGO_INITDB_ROOT_PASSWORD="$ci_mongo_password" \
             mongo:7
-          printf 'YOUTUBE_RAG__BLOB__ACCESS_KEY=%s\nYOUTUBE_RAG__BLOB__SECRET_KEY=%s\n' "$ci_minio_access_key" "$ci_minio_secret_key" >> "$GITHUB_ENV"
-          printf 'YOUTUBE_RAG__DOCUMENTDB__URI=mongodb://%s:%s@127.0.0.1:27017/?authSource=admin\n' "$ci_mongo_username" "$ci_mongo_password" >> "$GITHUB_ENV"
 
       - name: Wait for MinIO
         run: |
@@ -156,6 +157,6 @@ jobs:
       - name: Run integration tests
         run: uv run pytest -m integration --cov-fail-under=0
         env:
-          YOUTUBE_RAG__BLOB__ENDPOINT: http://localhost:9000
-          YOUTUBE_RAG__VECTORDB__HOST: localhost
-          YOUTUBE_RAG__VECTORDB__PORT: 6333
+          YOUTUBE_MCP_IT_MINIO_ENDPOINT: 127.0.0.1:9000
+          YOUTUBE_MCP_IT_QDRANT_HOST: 127.0.0.1
+          YOUTUBE_MCP_IT_QDRANT_PORT: 6333
