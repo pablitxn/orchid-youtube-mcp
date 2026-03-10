@@ -288,7 +288,8 @@ def _summarize_cookie_text(cookie_text: str) -> _CookieSummary:
         "youtube.com" in domain or "google.com" in domain for domain in domains
     )
     has_login_cookie_names = any(
-        cookie_name in {
+        cookie_name
+        in {
             "LOGIN_INFO",
             "SID",
             "HSID",

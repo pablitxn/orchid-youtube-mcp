@@ -258,9 +258,7 @@ class TestDocumentStoreAdapter:
         """Test update when document not found."""
         mock_resource["resource"].find_one.return_value = None
 
-        result = await adapter.update(
-            "videos", "nonexistent-uuid", {"status": "ready"}
-        )
+        result = await adapter.update("videos", "nonexistent-uuid", {"status": "ready"})
 
         assert result is False
 
@@ -312,9 +310,7 @@ class TestDocumentStoreAdapter:
 
         result = await adapter.delete_many("videos", {"status": "failed"})
 
-        mock_resource["collection"].delete_many.assert_called_with(
-            {"status": "failed"}
-        )
+        mock_resource["collection"].delete_many.assert_called_with({"status": "failed"})
         assert result == 5
 
     # =========================================================================

@@ -750,9 +750,7 @@ class TestAgentRoutes:
         response = client.post(
             "/v1/agent/videos/video-1/chat",
             json={
-                "messages": [
-                    {"role": "user", "content": "When does the chorus start?"}
-                ]
+                "messages": [{"role": "user", "content": "When does the chorus start?"}]
             },
         )
 
