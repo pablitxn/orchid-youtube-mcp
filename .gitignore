@@ -45,6 +45,7 @@ coverage.xml
 
 # Mypy
 .mypy_cache/
+*.tsbuildinfo
 
 # Ruff
 .ruff_cache/
@@ -70,6 +71,7 @@ Thumbs.db
 /config/appsettings.local.json
 /downloads/
 /temp/
+node_modules/
 
 # Claude Code
 .claude/

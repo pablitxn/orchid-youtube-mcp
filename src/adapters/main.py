@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -9,10 +10,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from mcp.server.sse import SseServerTransport
 from orchid_commons import create_fastapi_observability_middleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import FileResponse, Response
 from starlette.types import Receive, Scope, Send
 
-from src.adapters.api.routes import health, ingestion, query, sources, videos
+from src.adapters.api.routes import (
+    admin,
+    agent,
+    health,
+    ingestion,
+    query,
+    sources,
+    videos,
+)
 from src.adapters.dependencies import get_settings, init_services, shutdown_services
 from src.adapters.mcp.server import create_mcp_server
 from src.adapters.middleware.error_handler import build_error_middleware
@@ -91,10 +100,13 @@ def _register_routes(app: FastAPI, settings: Any) -> None:
     app.include_router(health.router, tags=["Health"])
 
     # API routes with version prefix
+    app.include_router(admin.router, prefix=prefix, tags=["Admin"])
+    app.include_router(agent.router, prefix=prefix, tags=["Agent"])
     app.include_router(ingestion.router, prefix=prefix, tags=["Ingestion"])
     app.include_router(query.router, prefix=prefix, tags=["Query"])
     app.include_router(sources.router, prefix=prefix, tags=["Sources"])
     app.include_router(videos.router, prefix=prefix, tags=["Videos"])
+    _register_frontend_routes(app)
 
 
 def _register_mcp_routes(app: FastAPI) -> None:
@@ -120,6 +132,39 @@ def _register_mcp_routes(app: FastAPI) -> None:
 
     app.add_api_route("/sse", sse_endpoint, methods=["GET"], include_in_schema=False)
     app.mount("/messages", sse_transport.handle_post_message, name="mcp-messages")
+
+
+def _register_frontend_routes(app: FastAPI) -> None:
+    """Serve the built React app when frontend assets are available."""
+    frontend_dir = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    index_file = frontend_dir / "index.html"
+    if not index_file.exists():
+        return
+
+    excluded_prefixes = (
+        "/v1",
+        "/health",
+        "/docs",
+        "/redoc",
+        "/api.json",
+        "/sse",
+        "/messages",
+    )
+
+    @app.get("/", include_in_schema=False)
+    async def frontend_index() -> Response:
+        return FileResponse(index_file)
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def frontend_catchall(path: str) -> Response:
+        normalized_path = f"/{path}".rstrip("/")
+        if normalized_path.startswith(excluded_prefixes):
+            return Response(status_code=404)
+
+        candidate = (frontend_dir / path).resolve()
+        if candidate.is_relative_to(frontend_dir) and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(index_file)
 
 
 # Create default app instance

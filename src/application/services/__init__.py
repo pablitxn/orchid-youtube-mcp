@@ -1,5 +1,6 @@
 """Application services for video ingestion and management."""
 
+from src.application.services.agent_playground import VideoAgentPlaygroundService
 from src.application.services.chunking import ChunkingResult, ChunkingService
 from src.application.services.embedding import EmbeddingOrchestrator, EmbeddingStats
 from src.application.services.ingestion import (
@@ -23,6 +24,7 @@ from src.application.services.query_decomposer import (
 from src.application.services.storage import VideoStorageService
 
 __all__ = [
+    "VideoAgentPlaygroundService",
     "ChunkingResult",
     "ChunkingService",
     "ContentBlock",

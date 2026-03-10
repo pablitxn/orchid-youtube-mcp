@@ -20,7 +20,20 @@ COPY pyproject.toml uv.lock* ./
 RUN uv sync --frozen --no-dev --no-editable
 
 # =============================================================================
-# Stage 2: Runtime - Final image
+# Stage 2: Frontend builder - Build the React admin UI
+# =============================================================================
+FROM node:24-bookworm-slim AS frontend-builder
+
+WORKDIR /frontend
+
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+# =============================================================================
+# Stage 3: Runtime - Final image
 # =============================================================================
 FROM python:3.14-slim AS runtime
 
@@ -49,6 +62,7 @@ COPY --from=builder /app/.venv /app/.venv
 # Copy source code and config
 COPY --chown=appuser:appgroup src/ ./src/
 COPY --chown=appuser:appgroup config/ ./config/
+COPY --chown=appuser:appgroup --from=frontend-builder /frontend/dist ./frontend/dist
 
 # Set ownership of app directory
 RUN chown -R appuser:appgroup /app

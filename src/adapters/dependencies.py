@@ -5,8 +5,10 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from src.application.services.agent_playground import VideoAgentPlaygroundService
 from src.application.services.ingestion import VideoIngestionService
 from src.application.services.query import VideoQueryService
+from src.application.services.storage import VideoStorageService
 from src.infrastructure.factory import (
     InfrastructureFactory,
     get_factory,
@@ -97,11 +99,40 @@ def get_query_service(
     )
 
 
+def get_storage_service(
+    factory: Annotated[InfrastructureFactory, Depends(get_infrastructure_factory)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> VideoStorageService:
+    """Get storage service for video metadata and chunk inspection."""
+    return VideoStorageService(
+        blob_storage=factory.get_blob_storage(),
+        document_db=factory.get_document_db(),
+        blob_settings=settings.blob_storage,
+        doc_settings=settings.document_db,
+    )
+
+
+def get_agent_playground_service(
+    settings: Annotated[Settings, Depends(get_settings)],
+    storage_service: Annotated[VideoStorageService, Depends(get_storage_service)],
+) -> VideoAgentPlaygroundService:
+    """Get the selected-video agent playground service."""
+    return VideoAgentPlaygroundService(
+        settings=settings,
+        storage_service=storage_service,
+    )
+
+
 # Type aliases for cleaner route signatures
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 FactoryDep = Annotated[InfrastructureFactory, Depends(get_infrastructure_factory)]
 IngestionServiceDep = Annotated[VideoIngestionService, Depends(get_ingestion_service)]
 QueryServiceDep = Annotated[VideoQueryService, Depends(get_query_service)]
+StorageServiceDep = Annotated[VideoStorageService, Depends(get_storage_service)]
+AgentPlaygroundServiceDep = Annotated[
+    VideoAgentPlaygroundService,
+    Depends(get_agent_playground_service),
+]
 
 
 async def init_services(

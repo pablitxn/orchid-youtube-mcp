@@ -87,7 +87,10 @@ class VideoQueryService:
         self._videos_collection = settings.document_db.collections.videos
         self._chunks_collection = settings.document_db.collections.transcript_chunks
         self._frames_collection = settings.document_db.collections.frame_chunks
+        self._audio_chunks_collection = settings.document_db.collections.audio_chunks
+        self._video_chunks_collection = settings.document_db.collections.video_chunks
         self._frames_bucket = settings.blob_storage.buckets.frames
+        self._chunks_bucket = settings.blob_storage.buckets.chunks
 
         # Agentic components
         self._decomposer = QueryDecomposer(llm_service)
@@ -877,18 +880,15 @@ class VideoQueryService:
                     extra={"citation_id": citation_id},
                 )
 
-                # Try to find the chunk in transcript chunks
-                chunk = await self._document_db.find_by_id(
-                    self._chunks_collection,
-                    citation_id,
-                )
+                chunk_result = await self._find_chunk_document(citation_id)
 
-                if not chunk:
+                if chunk_result is None:
                     self._logger.debug(
                         "Chunk not found for citation",
                         extra={"citation_id": citation_id},
                     )
                     continue
+                chunk, modality = chunk_result
 
                 self._logger.debug(
                     "Chunk found",
@@ -896,45 +896,18 @@ class VideoQueryService:
                         "citation_id": citation_id,
                         "start_time": chunk.get("start_time"),
                         "end_time": chunk.get("end_time"),
+                        "modality": modality.value,
                     },
                 )
 
                 # Build artifacts based on request
-                artifacts: dict[str, SourceArtifact] = {}
-
-                if "transcript_text" in request.include_artifacts:
-                    text_content = chunk.get("text", "")
-                    artifacts["transcript_text"] = SourceArtifact(
-                        type="transcript_text",
-                        content=text_content,
-                    )
-                    self._logger.debug(
-                        "Added transcript_text artifact",
-                        extra={"text_length": len(text_content)},
-                    )
-
-                if "thumbnail" in request.include_artifacts:
-                    self._logger.debug(
-                        "Fetching thumbnail for citation",
-                        extra={
-                            "citation_id": citation_id,
-                            "timestamp": chunk.get("start_time", 0),
-                        },
-                    )
-                    # Try to get thumbnail from frame associated with this timestamp
-                    thumbnail_url = await self._get_thumbnail_url(
-                        video_id,
-                        chunk.get("start_time", 0),
-                        expiry_minutes * 60,
-                    )
-                    if thumbnail_url:
-                        artifacts["thumbnail"] = SourceArtifact(
-                            type="thumbnail",
-                            url=thumbnail_url,
-                        )
-                        self._logger.debug("Thumbnail artifact added")
-                    else:
-                        self._logger.debug("No thumbnail available for timestamp")
+                artifacts = await self._build_source_artifacts(
+                    video_id=video_id,
+                    chunk=chunk,
+                    modality=modality,
+                    include_artifacts=request.include_artifacts,
+                    expiry_seconds=expiry_minutes * 60,
+                )
 
                 chunk_start_time = chunk.get("start_time", 0)
                 chunk_end_time = chunk.get("end_time", 0)
@@ -943,7 +916,7 @@ class VideoQueryService:
                 end_fmt = self._format_timestamp(chunk_end_time)
                 source = SourceDetail(
                     citation_id=citation_id,
-                    modality=QueryModality.TRANSCRIPT,
+                    modality=modality,
                     timestamp_range=TimestampRangeDTO(
                         start_time=chunk_start_time,
                         end_time=chunk_end_time,
@@ -976,6 +949,127 @@ class VideoQueryService:
                 sources=sources,
                 expires_at=expires_at,
             )
+
+    async def _find_chunk_document(
+        self,
+        chunk_id: str,
+    ) -> tuple[dict[str, Any], QueryModality] | None:
+        """Find a chunk document across all modality collections."""
+        search_order = [
+            (self._chunks_collection, QueryModality.TRANSCRIPT),
+            (self._frames_collection, QueryModality.FRAME),
+            (self._audio_chunks_collection, QueryModality.AUDIO),
+            (self._video_chunks_collection, QueryModality.VIDEO),
+        ]
+
+        for collection, modality in search_order:
+            chunk = await self._document_db.find_by_id(collection, chunk_id)
+            if chunk is not None:
+                return chunk, modality
+        return None
+
+    async def _build_source_artifacts(
+        self,
+        *,
+        video_id: str,
+        chunk: dict[str, Any],
+        modality: QueryModality,
+        include_artifacts: list[str],
+        expiry_seconds: int,
+    ) -> dict[str, SourceArtifact]:
+        """Build artifact payloads for source inspection."""
+        artifacts: dict[str, SourceArtifact] = {}
+
+        if "transcript_text" in include_artifacts and chunk.get("text"):
+            text_content = str(chunk.get("text", ""))
+            artifacts["transcript_text"] = SourceArtifact(
+                type="transcript_text",
+                content=text_content,
+            )
+
+        if modality == QueryModality.FRAME and "frame_image" in include_artifacts:
+            frame_path = chunk.get("blob_path")
+            if frame_path and self._blob is not None:
+                artifacts["frame_image"] = SourceArtifact(
+                    type="frame_image",
+                    url=await self._blob.generate_presigned_url(
+                        self._frames_bucket,
+                        str(frame_path),
+                        expiry_seconds,
+                    ),
+                )
+
+        if modality == QueryModality.AUDIO and "audio_clip" in include_artifacts:
+            audio_path = chunk.get("blob_path")
+            if audio_path and self._blob is not None:
+                artifacts["audio_clip"] = SourceArtifact(
+                    type="audio_clip",
+                    url=await self._blob.generate_presigned_url(
+                        self._chunks_bucket,
+                        str(audio_path),
+                        expiry_seconds,
+                    ),
+                )
+
+        if modality == QueryModality.VIDEO and "video_clip" in include_artifacts:
+            video_path = chunk.get("blob_path")
+            if video_path and self._blob is not None:
+                artifacts["video_clip"] = SourceArtifact(
+                    type="video_clip",
+                    url=await self._blob.generate_presigned_url(
+                        self._chunks_bucket,
+                        str(video_path),
+                        expiry_seconds,
+                    ),
+                )
+
+        if "thumbnail" in include_artifacts:
+            thumbnail_url = await self._resolve_thumbnail_url(
+                video_id=video_id,
+                chunk=chunk,
+                modality=modality,
+                expiry_seconds=expiry_seconds,
+            )
+            if thumbnail_url:
+                artifacts["thumbnail"] = SourceArtifact(
+                    type="thumbnail",
+                    url=thumbnail_url,
+                )
+
+        return artifacts
+
+    async def _resolve_thumbnail_url(
+        self,
+        *,
+        video_id: str,
+        chunk: dict[str, Any],
+        modality: QueryModality,
+        expiry_seconds: int,
+    ) -> str | None:
+        """Resolve a thumbnail URL for any chunk modality."""
+        if modality == QueryModality.FRAME and self._blob is not None:
+            thumbnail_path = chunk.get("thumbnail_path") or chunk.get("blob_path")
+            if thumbnail_path:
+                return await self._blob.generate_presigned_url(
+                    self._frames_bucket,
+                    str(thumbnail_path),
+                    expiry_seconds,
+                )
+
+        if modality == QueryModality.VIDEO and self._blob is not None:
+            thumbnail_path = chunk.get("thumbnail_path")
+            if thumbnail_path:
+                return await self._blob.generate_presigned_url(
+                    self._chunks_bucket,
+                    str(thumbnail_path),
+                    expiry_seconds,
+                )
+
+        return await self._get_thumbnail_url(
+            video_id,
+            chunk.get("start_time", 0),
+            expiry_seconds,
+        )
 
     async def _get_thumbnail_url(
         self,

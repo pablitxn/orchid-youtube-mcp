@@ -2151,6 +2151,7 @@ class VideoIngestionService:
     async def list_videos(
         self,
         status: VideoStatus | None = None,
+        statuses: list[VideoStatus] | None = None,
         skip: int = 0,
         limit: int = 20,
     ) -> list[IngestVideoResponse]:
@@ -2158,6 +2159,7 @@ class VideoIngestionService:
 
         Args:
             status: Optional status filter.
+            statuses: Optional list of status filters.
             skip: Number of videos to skip.
             limit: Maximum videos to return.
 
@@ -2165,8 +2167,11 @@ class VideoIngestionService:
             List of video responses.
         """
         filters: dict[str, Any] = {}
-        if status:
-            filters["status"] = status.value
+        effective_statuses = statuses or ([status] if status else [])
+        if len(effective_statuses) == 1:
+            filters["status"] = effective_statuses[0].value
+        elif effective_statuses:
+            filters["status"] = {"$in": [item.value for item in effective_statuses]}
 
         docs = await self._document_db.find(
             self._videos_collection,
@@ -2183,7 +2188,22 @@ class VideoIngestionService:
 
         return responses
 
-    async def delete_video(self, video_id: str) -> bool:
+    async def count_videos(
+        self,
+        status: VideoStatus | None = None,
+        statuses: list[VideoStatus] | None = None,
+    ) -> int:
+        """Count indexed videos with optional filtering."""
+        filters: dict[str, Any] = {}
+        effective_statuses = statuses or ([status] if status else [])
+        if len(effective_statuses) == 1:
+            filters["status"] = effective_statuses[0].value
+        elif effective_statuses:
+            filters["status"] = {"$in": [item.value for item in effective_statuses]}
+
+        return await self._document_db.count(self._videos_collection, filters)
+
+    async def delete_video(self, video_id: str) -> bool:  # noqa: PLR0912
         """Delete a video and all associated data.
 
         Removes all related data including:
@@ -2213,6 +2233,76 @@ class VideoIngestionService:
         )
 
         # Delete from vector DB - all embedding collections
+        deleted_vectors = 0
+        vector_collections = [
+            self._settings.vector_db.collections.transcripts,
+            self._settings.vector_db.collections.frames,
+            self._settings.vector_db.collections.videos,
+        ]
+
+        for collection in vector_collections:
+            deleted = await self._vector_db.delete_by_filter(
+                collection,
+                {"video_id": video_id},
+            )
+            deleted_vectors += deleted
+
+        # Delete chunk documents
+        deleted_chunks = 0
+        chunk_collections = [
+            self._chunks_collection,
+            self._frames_collection,
+            self._audio_chunks_collection,
+            self._video_chunks_collection,
+        ]
+
+        for collection in chunk_collections:
+            deleted = await self._document_db.delete_many(
+                collection,
+                {"video_id": video_id},
+            )
+            deleted_chunks += deleted
+
+        # Delete blob storage files
+        deleted_blobs = 0
+        for bucket in [
+            self._videos_bucket,
+            self._frames_bucket,
+            self._chunks_bucket,
+        ]:
+            try:
+                blobs = await self._blob.list_blobs(bucket, prefix=f"{video_id}/")
+                for blob_path in blobs:
+                    if await self._blob.delete(bucket, blob_path):
+                        deleted_blobs += 1
+            except Exception as e:
+                self._logger.warning(
+                    "Failed to delete some blobs",
+                    extra={
+                        "video_id": video_id,
+                        "bucket": bucket,
+                        "error": str(e),
+                    },
+                )
+
+        # Delete video metadata
+        deleted_metadata = await self._document_db.delete(
+            self._videos_collection,
+            video_id,
+        )
+
+        self._logger.info(
+            "Video deletion completed",
+            extra={
+                "video_id": video_id,
+                "deleted_metadata": deleted_metadata,
+                "deleted_vectors": deleted_vectors,
+                "deleted_chunks": deleted_chunks,
+                "deleted_blobs": deleted_blobs,
+            },
+        )
+
+        return deleted_metadata
         vector_collections = [
             self._settings.vector_db.collections.transcripts,
             self._settings.vector_db.collections.frames,
