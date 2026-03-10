@@ -429,8 +429,9 @@ class VideoIngestionService:
                     ProcessingStep.EMBEDDING, 0.0, 0.6, "Generating embeddings..."
                 )
 
-                video_metadata = video_metadata.model_copy(
-                    update={"status": VideoStatus.EMBEDDING}
+                video_metadata = self._transition_video(
+                    video_metadata,
+                    VideoStatus.EMBEDDING,
                 )
                 await self._update_video_status(video_metadata)
 
@@ -515,15 +516,13 @@ class VideoIngestionService:
                 self._logger.info("Phase 6 complete: Chunks stored in document DB")
 
                 # Update final metadata
-                video_metadata = video_metadata.model_copy(
-                    update={
-                        "status": VideoStatus.READY,
-                        "transcript_chunk_count": len(transcript_chunks),
-                        "frame_chunk_count": len(frames),
-                        "audio_chunk_count": len(audio_chunks),
-                        "video_chunk_count": len(video_chunks),
-                        "updated_at": datetime.now(UTC),
-                    }
+                video_metadata = self._transition_video(
+                    video_metadata,
+                    VideoStatus.READY,
+                    transcript_chunk_count=len(transcript_chunks),
+                    frame_chunk_count=len(frames),
+                    audio_chunk_count=len(audio_chunks),
+                    video_chunk_count=len(video_chunks),
                 )
                 await self._update_video_status(video_metadata)
 
@@ -630,6 +629,18 @@ class VideoIngestionService:
             video.id,
             video.model_dump(mode="json"),
         )
+
+    def _transition_video(
+        self,
+        video: VideoMetadata,
+        status: VideoStatus,
+        **updates: Any,
+    ) -> VideoMetadata:
+        """Advance video state while clearing stale failure details."""
+        transitioned = video.transition_to(status)
+        if not updates:
+            return transitioned
+        return transitioned.model_copy(update=updates)
 
     async def _mark_failed(self, video: VideoMetadata, error: str) -> None:
         """Mark video as failed."""
@@ -849,12 +860,11 @@ class VideoIngestionService:
             self._logger.debug("Audio upload complete")
 
             # Update metadata with blob paths
-            video_metadata = video_metadata.model_copy(
-                update={
-                    "blob_path_video": video_blob_path,
-                    "blob_path_audio": audio_blob_path,
-                    "status": VideoStatus.TRANSCRIBING,
-                }
+            video_metadata = self._transition_video(
+                video_metadata,
+                VideoStatus.TRANSCRIBING,
+                blob_path_video=video_blob_path,
+                blob_path_audio=audio_blob_path,
             )
             await self._update_video_status(video_metadata)
             self._logger.debug(
@@ -963,11 +973,10 @@ class VideoIngestionService:
         # Temp file deleted here
         self._logger.debug("Transcription temp directory cleaned up")
 
-        video_metadata = video_metadata.model_copy(
-            update={
-                "language": transcription.language,
-                "status": VideoStatus.EXTRACTING,
-            }
+        video_metadata = self._transition_video(
+            video_metadata,
+            VideoStatus.EXTRACTING,
+            language=transcription.language,
         )
         await self._update_video_status(video_metadata)
 
@@ -1927,10 +1936,11 @@ class VideoIngestionService:
         started_at: datetime,
     ) -> IngestVideoResponse:
         """Build response from existing video document."""
+        existing_status = existing.get("status")
         status = IngestionStatus.COMPLETED
-        if existing.get("status") == VideoStatus.FAILED.value:
+        if existing_status == VideoStatus.FAILED.value:
             status = IngestionStatus.FAILED
-        elif existing.get("status") != VideoStatus.READY.value:
+        elif existing_status != VideoStatus.READY.value:
             status = IngestionStatus.IN_PROGRESS
 
         return IngestVideoResponse(
@@ -1939,7 +1949,11 @@ class VideoIngestionService:
             title=existing["title"],
             duration_seconds=existing["duration_seconds"],
             status=status,
-            error_message=existing.get("error_message"),
+            error_message=(
+                existing.get("error_message")
+                if existing_status == VideoStatus.FAILED.value
+                else None
+            ),
             chunk_counts={
                 "transcript": existing.get("transcript_chunk_count", 0),
                 "frame": existing.get("frame_chunk_count", 0),
@@ -2096,8 +2110,9 @@ class VideoIngestionService:
         self._logger.debug("Resume: Generating embeddings")
         report_progress(ProcessingStep.EMBEDDING, 0.0, 0.6, "Generating embeddings...")
 
-        video_metadata = video_metadata.model_copy(
-            update={"status": VideoStatus.EMBEDDING}
+        video_metadata = self._transition_video(
+            video_metadata,
+            VideoStatus.EMBEDDING,
         )
         await self._update_video_status(video_metadata)
 
@@ -2138,15 +2153,13 @@ class VideoIngestionService:
             )
 
         # Update final metadata
-        video_metadata = video_metadata.model_copy(
-            update={
-                "status": VideoStatus.READY,
-                "transcript_chunk_count": len(transcript_chunks),
-                "frame_chunk_count": len(frames),
-                "audio_chunk_count": len(audio_chunks),
-                "video_chunk_count": len(video_chunks),
-                "updated_at": datetime.now(UTC),
-            }
+        video_metadata = self._transition_video(
+            video_metadata,
+            VideoStatus.READY,
+            transcript_chunk_count=len(transcript_chunks),
+            frame_chunk_count=len(frames),
+            audio_chunk_count=len(audio_chunks),
+            video_chunk_count=len(video_chunks),
         )
         await self._update_video_status(video_metadata)
 

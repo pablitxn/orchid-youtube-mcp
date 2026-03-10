@@ -523,6 +523,38 @@ class TestAdminRoutes:
         assert data["chunk_counts"]["frame"] == 12
         assert len(data["artifacts"]) == 3
 
+    def test_get_admin_video_detail_hides_stale_error_message(
+        self,
+        client,
+        mock_storage_service,
+    ):
+        """Test admin detail route hides stale errors once a video recovered."""
+        mock_storage_service.get_video_metadata.return_value = VideoMetadata(
+            id="video-1",
+            youtube_id="abc123xyz89",
+            youtube_url="https://www.youtube.com/watch?v=abc123xyz89",
+            title="Recovered Video",
+            description="Demo video",
+            duration_seconds=125,
+            channel_name="Channel",
+            channel_id="channel-1",
+            upload_date=datetime.now(UTC),
+            thumbnail_url="https://img.youtube.com/demo.jpg",
+            status=VideoStatus.READY,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            error_message="Old failure that should not leak",
+            transcript_chunk_count=4,
+            frame_chunk_count=12,
+            audio_chunk_count=2,
+            video_chunk_count=0,
+        )
+
+        response = client.get("/v1/admin/videos/video-1")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["error_message"] is None
+
     def test_get_admin_video_chunks(
         self,
         client,
