@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from time import perf_counter
 from typing import TYPE_CHECKING
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -12,6 +14,7 @@ from src.application.dtos.youtube_auth import (
     ManagedYouTubeCookie,
     YouTubeAuthMode,
     YouTubeAuthStatus,
+    YouTubeDownloadTestResult,
 )
 from src.infrastructure.youtube.downloader import YtDlpDownloader
 
@@ -53,7 +56,7 @@ class YouTubeAuthService:
         stored_cookie = await self._get_stored_cookie()
         if stored_cookie is None:
             self._remove_runtime_file()
-            self._apply_fallback_auth()
+            self._disable_auth()
             return
 
         decrypted_cookie = self._decrypt_cookie_text(
@@ -61,7 +64,7 @@ class YouTubeAuthService:
         )
         if decrypted_cookie is None:
             self._remove_runtime_file()
-            self._apply_fallback_auth()
+            self._disable_auth()
             return
 
         self._write_runtime_file(decrypted_cookie)
@@ -71,19 +74,11 @@ class YouTubeAuthService:
         """Return the current yt-dlp auth mode and managed cookie summary."""
         stored_cookie = await self._get_stored_cookie()
         runtime_file_present = self._runtime_file.exists()
-
-        if stored_cookie is not None:
-            mode = (
-                YouTubeAuthMode.MANAGED_COOKIE
-                if runtime_file_present
-                else self._fallback_mode()
-            )
-        elif self._settings.youtube.cookies_file:
-            mode = YouTubeAuthMode.STATIC_FILE
-        elif self._settings.youtube.cookies_from_browser:
-            mode = YouTubeAuthMode.BROWSER
-        else:
-            mode = YouTubeAuthMode.NONE
+        mode = (
+            YouTubeAuthMode.MANAGED_COOKIE
+            if stored_cookie is not None and runtime_file_present
+            else YouTubeAuthMode.NONE
+        )
 
         return YouTubeAuthStatus(
             mode=mode,
@@ -92,8 +87,6 @@ class YouTubeAuthService:
             source_label=stored_cookie.source_label if stored_cookie else None,
             updated_at=stored_cookie.updated_at if stored_cookie else None,
             runtime_file_present=runtime_file_present,
-            configured_cookies_file=self._settings.youtube.cookies_file,
-            configured_browser=self._settings.youtube.cookies_from_browser,
             cookie_line_count=stored_cookie.cookie_line_count if stored_cookie else 0,
             domain_count=stored_cookie.domain_count if stored_cookie else 0,
             contains_youtube_domains=(
@@ -146,11 +139,52 @@ class YouTubeAuthService:
         return await self.get_status()
 
     async def clear_cookie(self) -> YouTubeAuthStatus:
-        """Delete the managed cookies.txt and restore static fallback auth."""
+        """Delete the managed cookies.txt and disable authenticated downloads."""
         await self._document_db.delete(self._collection, self._COOKIE_DOCUMENT_ID)
         self._remove_runtime_file()
-        self._apply_fallback_auth()
+        self._disable_auth()
         return await self.get_status()
+
+    async def test_download(self, *, youtube_url: str) -> YouTubeDownloadTestResult:
+        """Run an ephemeral audio-only download to verify yt-dlp access."""
+        downloader = self._factory.get_youtube_downloader()
+        if not downloader.validate_url(youtube_url):
+            raise ValueError(
+                "Paste a supported YouTube watch, shorts, or youtu.be URL."
+            )
+
+        auth_status = await self.get_status()
+        scratch_root = self._runtime_file.parent
+        scratch_root.mkdir(parents=True, exist_ok=True)
+
+        started_at = perf_counter()
+        with TemporaryDirectory(prefix="download-test-", dir=scratch_root) as temp_dir:
+            artifact_path, metadata = await downloader.download_audio_only(
+                youtube_url,
+                Path(temp_dir),
+                audio_format="mp3",
+                audio_quality="128",
+            )
+            elapsed_ms = int((perf_counter() - started_at) * 1000)
+            downloaded_bytes = (
+                artifact_path.stat().st_size if artifact_path.exists() else 0
+            )
+
+            return YouTubeDownloadTestResult(
+                youtube_url=youtube_url,
+                youtube_id=metadata.id,
+                title=metadata.title,
+                channel_name=metadata.channel_name,
+                duration_seconds=metadata.duration_seconds,
+                auth_mode=auth_status.mode,
+                downloaded_bytes=downloaded_bytes,
+                artifact_name=artifact_path.name,
+                elapsed_ms=elapsed_ms,
+                note=(
+                    "Audio-only media was fetched to a temporary directory and "
+                    "deleted immediately after verification."
+                ),
+            )
 
     async def _get_stored_cookie(self) -> ManagedYouTubeCookie | None:
         document = await self._document_db.find_by_id(
@@ -173,32 +207,13 @@ class YouTubeAuthService:
         downloader = self._factory.get_youtube_downloader()
         if not isinstance(downloader, YtDlpDownloader):
             return
-        downloader.configure_auth(
-            cookies_file=self._runtime_file,
-            cookies_from_browser=None,
-        )
+        downloader.configure_auth(cookies_file=self._runtime_file)
 
-    def _apply_fallback_auth(self) -> None:
+    def _disable_auth(self) -> None:
         downloader = self._factory.get_youtube_downloader()
         if not isinstance(downloader, YtDlpDownloader):
             return
-
-        fallback_file = (
-            Path(self._settings.youtube.cookies_file)
-            if self._settings.youtube.cookies_file
-            else None
-        )
-        downloader.configure_auth(
-            cookies_file=fallback_file,
-            cookies_from_browser=self._settings.youtube.cookies_from_browser,
-        )
-
-    def _fallback_mode(self) -> YouTubeAuthMode:
-        if self._settings.youtube.cookies_file:
-            return YouTubeAuthMode.STATIC_FILE
-        if self._settings.youtube.cookies_from_browser:
-            return YouTubeAuthMode.BROWSER
-        return YouTubeAuthMode.NONE
+        downloader.configure_auth(cookies_file=None)
 
     def _get_cipher(self) -> Fernet | None:
         if not self._encryption_key:

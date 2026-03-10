@@ -196,11 +196,7 @@ export interface AgentChatResponse {
   tool_traces: AgentToolTrace[];
 }
 
-export type YouTubeAuthMode =
-  | "managed_cookie"
-  | "static_file"
-  | "browser"
-  | "none";
+export type YouTubeAuthMode = "managed_cookie" | "none";
 
 export interface YouTubeAuthStatus {
   mode: YouTubeAuthMode;
@@ -209,12 +205,27 @@ export interface YouTubeAuthStatus {
   source_label: string | null;
   updated_at: string | null;
   runtime_file_present: boolean;
-  configured_cookies_file: string | null;
-  configured_browser: string | null;
   cookie_line_count: number;
   domain_count: number;
   contains_youtube_domains: boolean;
   has_login_cookie_names: boolean;
+}
+
+export interface YouTubeDownloadTestRequest {
+  youtube_url: string;
+}
+
+export interface YouTubeDownloadTestResult {
+  youtube_url: string;
+  youtube_id: string;
+  title: string;
+  channel_name: string;
+  duration_seconds: number;
+  auth_mode: YouTubeAuthMode;
+  downloaded_bytes: number;
+  artifact_name: string;
+  elapsed_ms: number;
+  note: string;
 }
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)
@@ -351,5 +362,14 @@ export async function saveYouTubeCookie(payload: {
 export async function clearYouTubeCookie(): Promise<YouTubeAuthStatus> {
   return request<YouTubeAuthStatus>("/v1/admin/youtube-auth/cookie", {
     method: "DELETE",
+  });
+}
+
+export async function runYouTubeDownloadTest(
+  payload: YouTubeDownloadTestRequest,
+): Promise<YouTubeDownloadTestResult> {
+  return request<YouTubeDownloadTestResult>("/v1/admin/youtube-auth/download-test", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }

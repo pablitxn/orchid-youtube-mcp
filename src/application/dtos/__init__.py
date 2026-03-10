@@ -33,6 +33,7 @@ from src.application.dtos.youtube_auth import (
     ManagedYouTubeCookie,
     YouTubeAuthMode,
     YouTubeAuthStatus,
+    YouTubeDownloadTestResult,
 )
 
 __all__ = [
@@ -65,4 +66,5 @@ __all__ = [
     "ManagedYouTubeCookie",
     "YouTubeAuthMode",
     "YouTubeAuthStatus",
+    "YouTubeDownloadTestResult",
 ]

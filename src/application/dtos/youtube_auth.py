@@ -10,8 +10,6 @@ class YouTubeAuthMode(str, Enum):
     """How yt-dlp authentication is currently resolved."""
 
     MANAGED_COOKIE = "managed_cookie"
-    STATIC_FILE = "static_file"
-    BROWSER = "browser"
     NONE = "none"
 
 
@@ -35,14 +33,6 @@ class YouTubeAuthStatus(BaseModel):
     )
     runtime_file_present: bool = Field(
         description="Whether the runtime cookies.txt file currently exists"
-    )
-    configured_cookies_file: str | None = Field(
-        default=None,
-        description="Static cookies file configured in settings",
-    )
-    configured_browser: str | None = Field(
-        default=None,
-        description="Browser extraction fallback configured in settings",
     )
     cookie_line_count: int = Field(
         ge=0,
@@ -71,3 +61,28 @@ class ManagedYouTubeCookie(BaseModel):
     contains_youtube_domains: bool = Field(default=False)
     has_login_cookie_names: bool = Field(default=False)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class YouTubeDownloadTestResult(BaseModel):
+    """Result of an ephemeral yt-dlp download diagnostic."""
+
+    youtube_url: str = Field(description="Tested YouTube URL")
+    youtube_id: str = Field(description="Resolved YouTube video ID")
+    title: str = Field(description="Resolved video title")
+    channel_name: str = Field(description="Resolved channel name")
+    duration_seconds: int = Field(ge=0, description="Video duration in seconds")
+    auth_mode: YouTubeAuthMode = Field(
+        description="Authentication mode that was active during the download"
+    )
+    downloaded_bytes: int = Field(
+        ge=0,
+        description="Size of the temporary downloaded artifact before deletion",
+    )
+    artifact_name: str = Field(description="Temporary artifact filename")
+    elapsed_ms: int = Field(
+        ge=0,
+        description="End-to-end diagnostic time in milliseconds",
+    )
+    note: str = Field(
+        description="Operator-facing note about what happened during the test"
+    )
