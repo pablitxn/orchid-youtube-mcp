@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.infrastructure.youtube.downloader import YtDlpDownloader
+from src.infrastructure.youtube.downloader import DownloadError, YtDlpDownloader
 
 
 @pytest.fixture
@@ -145,3 +145,53 @@ class TestDownloaderInit:
 
         downloader.configure_auth(cookies_file=None)
         assert downloader._cookies_file is None
+
+    def test_base_opts_enable_node_runtime(self, monkeypatch):
+        """Test yt-dlp opts explicitly enable node when it is installed."""
+        monkeypatch.setattr(
+            "src.infrastructure.youtube.downloader.shutil.which",
+            lambda command: "/usr/bin/node" if command == "node" else None,
+        )
+
+        downloader = YtDlpDownloader()
+
+        opts = downloader._get_base_opts()
+
+        assert opts["js_runtimes"] == {"node": {"path": "/usr/bin/node"}}
+
+
+class TestDownloadErrorClassification:
+    """Tests for actionable yt-dlp error classification."""
+
+    def test_classifies_rotated_cookie_warning(self):
+        """Test that rotated browser cookies surface as auth-invalid."""
+        downloader = YtDlpDownloader()
+
+        error = downloader._classify_download_error(
+            "https://www.youtube.com/watch?v=test1234567",
+            "ERROR: [youtube] test1234567: Sign in to confirm you're not a bot",
+            diagnostics=[
+                (
+                    "WARNING: [youtube] The provided YouTube account cookies are "
+                    "no longer valid."
+                )
+            ],
+        )
+
+        assert isinstance(error, DownloadError)
+        assert error.code == "YOUTUBE_AUTH_INVALID"
+        assert error.status_code == 409
+        assert error.kind == "auth_invalid"
+
+    def test_classifies_challenge_failures(self):
+        """Test that JS challenge failures surface with a dedicated code."""
+        downloader = YtDlpDownloader()
+
+        error = downloader._classify_download_error(
+            "https://www.youtube.com/watch?v=test1234567",
+            "WARNING: [youtube] test1234567: n challenge solving failed",
+        )
+
+        assert error.code == "YOUTUBE_CHALLENGE_FAILED"
+        assert error.status_code == 502
+        assert error.kind == "challenge_failed"

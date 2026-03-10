@@ -48,20 +48,26 @@ def _handle_ingestion_error(exc: Exception) -> ErrorResponse:
     assert isinstance(exc, IngestionError)
     from src.application.dtos.ingestion import ProcessingStep
 
+    code = exc.code
+    status_code = exc.status_code
+    details = {"step": exc.step.value, **exc.details}
+
     if exc.step == ProcessingStep.VALIDATING:
+        code = "VALIDATION_ERROR"
+        status_code = 400
         return ErrorResponse(
-            code="VALIDATION_ERROR",
+            code=code,
             message=str(exc),
-            status_code=400,
-            details={"step": exc.step.value},
+            status_code=status_code,
+            details=details,
         )
     import logging
 
     return ErrorResponse(
-        code="INGESTION_ERROR",
+        code=code,
         message=str(exc),
-        status_code=500,
-        details={"step": exc.step.value},
+        status_code=status_code,
+        details=details,
         log_level=logging.ERROR,
     )
 

@@ -417,6 +417,11 @@ export function HomeView() {
                 the app back into anonymous YouTube access until you paste a fresh
                 export.
               </p>
+              <p className="helper-copy">
+                If the download diagnostic says the cookie is expired, rotated, or
+                rejected by YouTube, export a fresh <code>cookies.txt</code> and
+                replace it here. YouTube rotates these often.
+              </p>
 
               {authError !== null ? <p className="inline-error">{authError}</p> : null}
 

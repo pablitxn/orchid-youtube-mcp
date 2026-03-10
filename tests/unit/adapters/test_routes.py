@@ -27,6 +27,7 @@ from src.application.dtos.youtube_auth import (
 )
 from src.domain.models.chunk import TranscriptChunk
 from src.domain.models.video import VideoMetadata, VideoStatus
+from src.infrastructure.youtube.downloader import DownloadError
 
 
 @pytest.fixture
@@ -670,6 +671,30 @@ class TestAdminRoutes:
         data = response.json()
         assert data["auth_mode"] == "managed_cookie"
         assert data["downloaded_bytes"] == 1_048_576
+
+    def test_run_youtube_download_test_with_invalid_cookie(
+        self,
+        client,
+        mock_youtube_auth_service,
+    ):
+        """Test that auth-related yt-dlp failures keep their specific code."""
+        mock_youtube_auth_service.test_download.side_effect = DownloadError(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "YouTube rejected the managed cookies.txt as expired or rotated.",
+            code="YOUTUBE_AUTH_INVALID",
+            status_code=409,
+            kind="auth_invalid",
+        )
+
+        response = client.post(
+            "/v1/admin/youtube-auth/download-test",
+            json={"youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        payload = response.json()
+        assert payload["error"]["code"] == "YOUTUBE_AUTH_INVALID"
+        assert payload["error"]["details"]["kind"] == "auth_invalid"
 
 
 class TestAgentRoutes:
