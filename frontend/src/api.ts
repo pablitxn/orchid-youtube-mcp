@@ -247,8 +247,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const errorPayload = (await response.json()) as {
         message?: string;
         detail?: string;
+        error?: {
+          message?: string;
+          detail?: string;
+        };
       };
-      message = errorPayload.message || errorPayload.detail || message;
+      message =
+        errorPayload.error?.message ||
+        errorPayload.error?.detail ||
+        errorPayload.message ||
+        errorPayload.detail ||
+        message;
     } catch {
       // Ignore JSON parsing issues for non-JSON error responses.
     }

@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
@@ -27,10 +28,43 @@ class VideoNotFoundError(Exception):
 class DownloadError(Exception):
     """Raised when download fails."""
 
-    def __init__(self, url: str, reason: str) -> None:
+    def __init__(
+        self,
+        url: str,
+        reason: str,
+        *,
+        code: str = "YOUTUBE_DOWNLOAD_FAILED",
+        status_code: int = 502,
+        kind: str = "download_failed",
+        details: dict[str, str] | None = None,
+        raw_reason: str | None = None,
+    ) -> None:
         self.url = url
         self.reason = reason
+        self.code = code
+        self.status_code = status_code
+        self.kind = kind
+        self.details = {"kind": kind, **(details or {})}
+        self.raw_reason = raw_reason or reason
         super().__init__(f"Download failed for {url}: {reason}")
+
+
+class _YtDlpLogCollector:
+    """Capture non-progress yt-dlp warnings/errors for classification."""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def debug(self, message: str) -> None:
+        """Ignore debug output to keep diagnostics focused."""
+
+    def warning(self, message: str) -> None:
+        """Capture warnings emitted by yt-dlp extractors."""
+        self.messages.append(str(message))
+
+    def error(self, message: str) -> None:
+        """Capture errors emitted by yt-dlp."""
+        self.messages.append(str(message))
 
 
 class YtDlpDownloader(YouTubeDownloaderBase):
@@ -46,6 +80,27 @@ class YtDlpDownloader(YouTubeDownloaderBase):
     ]
     _VIDEO_ID_PATTERN: ClassVar[re.Pattern[str]] = re.compile(
         r"(?:v=|/(?:shorts/|embed/|v/)|youtu\.be/)([\w-]{11})"
+    )
+    _AUTH_COOKIE_ROTATED_MARKERS: ClassVar[tuple[str, ...]] = (
+        "cookies are no longer valid",
+    )
+    _AUTH_REQUIRED_MARKERS: ClassVar[tuple[str, ...]] = (
+        "sign in to confirm you're not a bot",
+        "sign in to confirm you\u2019re not a bot",
+        "login_required",
+    )
+    _CHALLENGE_FAILURE_MARKERS: ClassVar[tuple[str, ...]] = (
+        "n challenge solving failed",
+        "no supported javascript runtime",
+        "js runtimes: none",
+        "js challenge providers",
+    )
+    _STREAM_FORBIDDEN_MARKERS: ClassVar[tuple[str, ...]] = (
+        "http error 403: forbidden",
+        "fragment not found",
+    )
+    _EMPTY_FILE_MARKERS: ClassVar[tuple[str, ...]] = (
+        "downloaded file is empty",
     )
 
     def __init__(
@@ -64,6 +119,7 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         self._cookies_file = cookies_file
         self._proxy = proxy
         self._rate_limit = rate_limit
+        self._node_path = shutil.which("node")
 
     def configure_auth(
         self,
@@ -77,9 +133,12 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         """Get base yt-dlp options."""
         opts: dict[str, Any] = {
             "quiet": True,
-            "no_warnings": True,
+            "no_warnings": False,
             "extract_flat": False,
         }
+
+        if self._node_path:
+            opts["js_runtimes"] = {"node": {"path": self._node_path}}
 
         # Managed cookie authentication
         if self._cookies_file:
@@ -125,16 +184,28 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         )
 
         def _download_video() -> dict[str, Any]:
-            with yt_dlp.YoutubeDL(video_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
+            collector = _YtDlpLogCollector()
+            with yt_dlp.YoutubeDL({**video_opts, "logger": collector}) as ydl:
+                try:
+                    info = ydl.extract_info(url, download=True)
+                except yt_dlp.DownloadError as exc:
+                    raise self._classify_download_error(
+                        url,
+                        str(exc),
+                        diagnostics=collector.messages,
+                    ) from exc
+
                 if info is None:
                     raise VideoNotFoundError(url)
+
+                self._ensure_nonempty_file(
+                    video_path,
+                    url,
+                    diagnostics=collector.messages,
+                )
                 return dict(info)
 
-        try:
-            format_info = await loop.run_in_executor(None, _download_video)
-        except yt_dlp.DownloadError as e:
-            raise DownloadError(url, str(e)) from e
+        format_info = await loop.run_in_executor(None, _download_video)
 
         # Extract audio
         # Use %(ext)s so yt-dlp handles extensions correctly during conversion
@@ -155,13 +226,24 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         )
 
         def _extract_audio() -> None:
-            with yt_dlp.YoutubeDL(audio_opts) as ydl:
-                ydl.extract_info(url, download=True)
+            collector = _YtDlpLogCollector()
+            with yt_dlp.YoutubeDL({**audio_opts, "logger": collector}) as ydl:
+                try:
+                    ydl.extract_info(url, download=True)
+                except yt_dlp.DownloadError as exc:
+                    raise self._classify_download_error(
+                        url,
+                        f"Audio extraction failed: {exc}",
+                        diagnostics=collector.messages,
+                    ) from exc
 
-        try:
-            await loop.run_in_executor(None, _extract_audio)
-        except yt_dlp.DownloadError as e:
-            raise DownloadError(url, f"Audio extraction failed: {e}") from e
+                self._ensure_nonempty_file(
+                    audio_path,
+                    url,
+                    diagnostics=collector.messages,
+                )
+
+        await loop.run_in_executor(None, _extract_audio)
 
         return DownloadResult(
             video_path=video_path,
@@ -202,13 +284,24 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         )
 
         def _download() -> None:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.extract_info(url, download=True)
+            collector = _YtDlpLogCollector()
+            with yt_dlp.YoutubeDL({**opts, "logger": collector}) as ydl:
+                try:
+                    ydl.extract_info(url, download=True)
+                except yt_dlp.DownloadError as exc:
+                    raise self._classify_download_error(
+                        url,
+                        str(exc),
+                        diagnostics=collector.messages,
+                    ) from exc
 
-        try:
-            await loop.run_in_executor(None, _download)
-        except yt_dlp.DownloadError as e:
-            raise DownloadError(url, str(e)) from e
+                self._ensure_nonempty_file(
+                    audio_path,
+                    url,
+                    diagnostics=collector.messages,
+                )
+
+        await loop.run_in_executor(None, _download)
 
         # After FFmpegExtractAudio, the file will have the target extension
         return audio_path, metadata
@@ -221,18 +314,28 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         opts["skip_download"] = True
 
         def _extract() -> dict[str, Any]:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+            collector = _YtDlpLogCollector()
+            with yt_dlp.YoutubeDL({**opts, "logger": collector}) as ydl:
+                try:
+                    info = ydl.extract_info(url, download=False)
+                except yt_dlp.DownloadError as exc:
+                    raw_reason = str(exc)
+                    if (
+                        "Video unavailable" in raw_reason
+                        or "Private video" in raw_reason
+                    ):
+                        raise VideoNotFoundError(url) from exc
+                    raise self._classify_download_error(
+                        url,
+                        raw_reason,
+                        diagnostics=collector.messages,
+                    ) from exc
+
                 if info is None:
                     raise VideoNotFoundError(url)
                 return dict(info)
 
-        try:
-            info = await loop.run_in_executor(None, _extract)
-        except yt_dlp.DownloadError as e:
-            if "Video unavailable" in str(e) or "Private video" in str(e):
-                raise VideoNotFoundError(url) from e
-            raise DownloadError(url, str(e)) from e
+        info = await loop.run_in_executor(None, _extract)
 
         # Parse upload date
         upload_date_str = info.get("upload_date", "")
@@ -278,16 +381,22 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         )
 
         def _extract() -> dict[str, Any]:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+            collector = _YtDlpLogCollector()
+            with yt_dlp.YoutubeDL({**opts, "logger": collector}) as ydl:
+                try:
+                    info = ydl.extract_info(url, download=False)
+                except yt_dlp.DownloadError as exc:
+                    raise self._classify_download_error(
+                        url,
+                        str(exc),
+                        diagnostics=collector.messages,
+                    ) from exc
+
                 if info is None:
                     raise VideoNotFoundError(url)
                 return dict(info)
 
-        try:
-            info = await loop.run_in_executor(None, _extract)
-        except yt_dlp.DownloadError as e:
-            raise DownloadError(url, str(e)) from e
+        info = await loop.run_in_executor(None, _extract)
 
         subtitles: list[SubtitleTrack] = []
 
@@ -334,16 +443,22 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         opts["skip_download"] = True
 
         def _extract() -> list[dict[str, Any]]:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+            collector = _YtDlpLogCollector()
+            with yt_dlp.YoutubeDL({**opts, "logger": collector}) as ydl:
+                try:
+                    info = ydl.extract_info(url, download=False)
+                except yt_dlp.DownloadError as exc:
+                    raise self._classify_download_error(
+                        url,
+                        str(exc),
+                        diagnostics=collector.messages,
+                    ) from exc
+
                 if info is None:
                     raise VideoNotFoundError(url)
                 return list(info.get("formats", []))
 
-        try:
-            formats = await loop.run_in_executor(None, _extract)
-        except yt_dlp.DownloadError as e:
-            raise DownloadError(url, str(e)) from e
+        formats = await loop.run_in_executor(None, _extract)
 
         return [
             {
@@ -375,3 +490,102 @@ class YtDlpDownloader(YouTubeDownloaderBase):
     def supported_url_patterns(self) -> list[str]:
         """URL patterns supported by this downloader."""
         return self._URL_PATTERNS.copy()
+
+    def _ensure_nonempty_file(
+        self,
+        path: Path,
+        url: str,
+        *,
+        diagnostics: list[str] | None = None,
+    ) -> None:
+        """Fail fast when yt-dlp leaves behind an empty artifact."""
+        if path.exists() and path.stat().st_size > 0:
+            return
+        raise self._classify_download_error(
+            url,
+            "ERROR: The downloaded file is empty",
+            diagnostics=diagnostics,
+        )
+
+    def _classify_download_error(
+        self,
+        url: str,
+        raw_reason: str,
+        *,
+        diagnostics: list[str] | None = None,
+    ) -> DownloadError:
+        """Map yt-dlp failures to actionable API-level errors."""
+        combined = "\n".join([raw_reason, *(diagnostics or [])]).casefold()
+
+        if any(marker in combined for marker in self._AUTH_COOKIE_ROTATED_MARKERS):
+            return DownloadError(
+                url,
+                (
+                    "YouTube rejected the managed cookies.txt as expired or rotated. "
+                    "Export a fresh cookies.txt from the browser, save it again, "
+                    "and retry."
+                ),
+                code="YOUTUBE_AUTH_INVALID",
+                status_code=409,
+                kind="auth_invalid",
+                raw_reason=raw_reason,
+            )
+
+        if any(marker in combined for marker in self._AUTH_REQUIRED_MARKERS):
+            return DownloadError(
+                url,
+                (
+                    "This video requires a valid logged-in YouTube session. "
+                    "Save a fresh cookies.txt and retry."
+                ),
+                code="YOUTUBE_AUTH_REQUIRED",
+                status_code=409,
+                kind="auth_required",
+                raw_reason=raw_reason,
+            )
+
+        if any(marker in combined for marker in self._CHALLENGE_FAILURE_MARKERS):
+            return DownloadError(
+                url,
+                (
+                    "yt-dlp could not solve YouTube's JavaScript challenge for "
+                    "this video. Refresh yt-dlp/EJS support on the server and retry."
+                ),
+                code="YOUTUBE_CHALLENGE_FAILED",
+                status_code=502,
+                kind="challenge_failed",
+                raw_reason=raw_reason,
+            )
+
+        if any(marker in combined for marker in self._STREAM_FORBIDDEN_MARKERS):
+            return DownloadError(
+                url,
+                (
+                    "YouTube rejected the media stream with HTTP 403. This usually "
+                    "means stale auth, anti-bot rejection, or a client/runtime "
+                    "mismatch."
+                ),
+                code="YOUTUBE_STREAM_FORBIDDEN",
+                status_code=502,
+                kind="stream_forbidden",
+                raw_reason=raw_reason,
+            )
+
+        if any(marker in combined for marker in self._EMPTY_FILE_MARKERS):
+            return DownloadError(
+                url,
+                (
+                    "yt-dlp finished with an empty media file. This usually means "
+                    "YouTube rejected the download mid-stream."
+                ),
+                code="YOUTUBE_EMPTY_DOWNLOAD",
+                status_code=502,
+                kind="empty_download",
+                raw_reason=raw_reason,
+            )
+
+        return DownloadError(
+            url,
+            raw_reason,
+            raw_reason=raw_reason,
+        )

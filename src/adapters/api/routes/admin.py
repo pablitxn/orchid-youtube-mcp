@@ -428,9 +428,10 @@ async def run_youtube_download_test(
         ) from exc
     except DownloadError as exc:
         raise APIError(
-            code="YOUTUBE_DOWNLOAD_TEST_FAILED",
+            code=exc.code,
             message=str(exc),
-            status_code=status.HTTP_502_BAD_GATEWAY,
+            status_code=exc.status_code,
+            details=exc.details,
         ) from exc
 
 

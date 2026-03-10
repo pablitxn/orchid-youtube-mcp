@@ -41,8 +41,19 @@ from src.infrastructure.youtube.downloader import DownloadError, VideoNotFoundEr
 class IngestionError(Exception):
     """Base exception for ingestion errors."""
 
-    def __init__(self, message: str, step: ProcessingStep) -> None:
+    def __init__(
+        self,
+        message: str,
+        step: ProcessingStep,
+        *,
+        code: str = "INGESTION_ERROR",
+        status_code: int = 500,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         self.step = step
+        self.code = code
+        self.status_code = status_code
+        self.details = details or {}
         super().__init__(message)
 
 
@@ -558,11 +569,23 @@ class VideoIngestionService:
         except DownloadError as e:
             self._logger.error(
                 "Download failed",
-                extra={"url": request.url, "error": str(e)},
+                extra={
+                    "url": request.url,
+                    "error": str(e),
+                    "error_code": e.code,
+                    "download_kind": e.kind,
+                    "raw_reason": e.raw_reason,
+                },
             )
             if video_metadata:
                 await self._mark_failed(video_metadata, str(e))
-            raise IngestionError(str(e), ProcessingStep.DOWNLOADING) from e
+            raise IngestionError(
+                str(e),
+                ProcessingStep.DOWNLOADING,
+                code=e.code,
+                status_code=e.status_code,
+                details=e.details,
+            ) from e
 
         except Exception as e:
             self._logger.exception(
