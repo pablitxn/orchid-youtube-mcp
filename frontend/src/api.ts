@@ -196,6 +196,27 @@ export interface AgentChatResponse {
   tool_traces: AgentToolTrace[];
 }
 
+export type YouTubeAuthMode =
+  | "managed_cookie"
+  | "static_file"
+  | "browser"
+  | "none";
+
+export interface YouTubeAuthStatus {
+  mode: YouTubeAuthMode;
+  encryption_configured: boolean;
+  has_managed_cookie: boolean;
+  source_label: string | null;
+  updated_at: string | null;
+  runtime_file_present: boolean;
+  configured_cookies_file: string | null;
+  configured_browser: string | null;
+  cookie_line_count: number;
+  domain_count: number;
+  contains_youtube_domains: boolean;
+  has_login_cookie_names: boolean;
+}
+
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)
   ?.replace(/\/$/, "") ?? "";
 
@@ -310,5 +331,25 @@ export async function chatWithVideoAgent(
   return request<AgentChatResponse>(`/v1/agent/videos/${videoId}/chat`, {
     method: "POST",
     body: JSON.stringify({ messages }),
+  });
+}
+
+export async function getYouTubeAuthStatus(): Promise<YouTubeAuthStatus> {
+  return request<YouTubeAuthStatus>("/v1/admin/youtube-auth");
+}
+
+export async function saveYouTubeCookie(payload: {
+  cookie_text: string;
+  source_label: string | null;
+}): Promise<YouTubeAuthStatus> {
+  return request<YouTubeAuthStatus>("/v1/admin/youtube-auth/cookie", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function clearYouTubeCookie(): Promise<YouTubeAuthStatus> {
+  return request<YouTubeAuthStatus>("/v1/admin/youtube-auth/cookie", {
+    method: "DELETE",
   });
 }

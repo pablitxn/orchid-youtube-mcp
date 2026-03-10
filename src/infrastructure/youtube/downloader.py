@@ -69,6 +69,16 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         self._proxy = proxy
         self._rate_limit = rate_limit
 
+    def configure_auth(
+        self,
+        *,
+        cookies_file: Path | None,
+        cookies_from_browser: str | None,
+    ) -> None:
+        """Update auth configuration without recreating the downloader."""
+        self._cookies_file = cookies_file
+        self._cookies_from_browser = cookies_from_browser
+
     def _get_base_opts(self) -> dict[str, Any]:
         """Get base yt-dlp options."""
         opts: dict[str, Any] = {

@@ -22,6 +22,7 @@ from src.application.services.query_decomposer import (
     SubTaskResult,
 )
 from src.application.services.storage import VideoStorageService
+from src.application.services.youtube_auth import YouTubeAuthService
 
 __all__ = [
     "VideoAgentPlaygroundService",
@@ -41,5 +42,6 @@ __all__ = [
     "VideoIngestionService",
     "VideoQueryService",
     "VideoStorageService",
+    "YouTubeAuthService",
     "create_context_message",
 ]
