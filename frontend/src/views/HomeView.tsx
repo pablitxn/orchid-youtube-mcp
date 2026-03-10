@@ -621,7 +621,7 @@ export function HomeView() {
           </form>
         </div>
 
-        <section className="panel">
+        <section className="panel panel-body">
           <div className="section-heading">
             <div>
               <p className="eyebrow">Library</p>
