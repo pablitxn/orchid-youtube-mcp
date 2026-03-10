@@ -1,10 +1,10 @@
 """Video query endpoints."""
 
 from fastapi import APIRouter, status
+from orchid_commons import APIError
 from pydantic import BaseModel, Field
 
 from src.adapters.dependencies import QueryServiceDep
-from orchid_commons import APIError
 from src.application.dtos.query import (
     CitationDTO,
     QueryMetadata,

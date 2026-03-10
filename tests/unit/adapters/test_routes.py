@@ -8,6 +8,7 @@ from fastapi import status
 from fastapi.testclient import TestClient
 
 from src.adapters.main import create_app
+from src.application.dtos.agent import AgentChatResult, AgentToolTrace
 from src.application.dtos.ingestion import IngestionStatus, IngestVideoResponse
 from src.application.dtos.query import (
     CitationDTO,
@@ -19,6 +20,8 @@ from src.application.dtos.query import (
     SourcesResponse,
     TimestampRangeDTO,
 )
+from src.domain.models.chunk import TranscriptChunk
+from src.domain.models.video import VideoMetadata, VideoStatus
 
 
 @pytest.fixture
@@ -33,10 +36,16 @@ def mock_settings():
     settings.server.docs_enabled = True
     # Add collections settings for health checks
     settings.document_db.collections.videos = "videos"
+    settings.document_db.collections.transcript_chunks = "transcript_chunks"
+    settings.document_db.collections.frame_chunks = "frame_chunks"
+    settings.document_db.collections.audio_chunks = "audio_chunks"
+    settings.document_db.collections.video_chunks = "video_chunks"
     settings.document_db.provider = "mongodb"
     settings.vector_db.collections.transcripts = "transcripts"
     settings.vector_db.provider = "qdrant"
     settings.blob_storage.buckets.videos = "videos"
+    settings.blob_storage.buckets.frames = "frames"
+    settings.blob_storage.buckets.chunks = "chunks"
     settings.blob_storage.provider = "minio"
     return settings
 
@@ -60,6 +69,7 @@ def mock_factory():
 def mock_ingestion_service():
     """Create mock ingestion service."""
     service = AsyncMock()
+    service.count_videos.return_value = 0
     return service
 
 
@@ -71,13 +81,43 @@ def mock_query_service():
 
 
 @pytest.fixture
-def client(mock_settings, mock_factory, mock_ingestion_service, mock_query_service):
+def mock_storage_service():
+    """Create mock storage service."""
+    service = MagicMock()
+    service.list_videos = AsyncMock(return_value=[])
+    service.get_video_metadata = AsyncMock(return_value=None)
+    service.get_chunks_for_video = AsyncMock(return_value=[])
+    service.get_presigned_url = AsyncMock(return_value="https://signed.example/object")
+    service._videos_bucket = "videos"
+    service._frames_bucket = "frames"
+    service._chunks_bucket = "chunks"
+    return service
+
+
+@pytest.fixture
+def mock_agent_playground_service():
+    """Create mock agent playground service."""
+    service = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def client(
+    mock_settings,
+    mock_factory,
+    mock_ingestion_service,
+    mock_query_service,
+    mock_storage_service,
+    mock_agent_playground_service,
+):
     """Create test client with mocked dependencies."""
     from src.adapters.dependencies import (
+        get_agent_playground_service,
         get_infrastructure_factory,
         get_ingestion_service,
         get_query_service,
         get_settings,
+        get_storage_service,
     )
 
     with (
@@ -91,6 +131,10 @@ def client(mock_settings, mock_factory, mock_ingestion_service, mock_query_servi
         app.dependency_overrides[get_infrastructure_factory] = lambda: mock_factory
         app.dependency_overrides[get_ingestion_service] = lambda: mock_ingestion_service
         app.dependency_overrides[get_query_service] = lambda: mock_query_service
+        app.dependency_overrides[get_storage_service] = lambda: mock_storage_service
+        app.dependency_overrides[get_agent_playground_service] = (
+            lambda: mock_agent_playground_service
+        )
         yield TestClient(app, raise_server_exceptions=False)
 
 
@@ -367,6 +411,181 @@ class TestVideoManagementRoutes:
         response = client.delete(
             "/v1/videos/nonexistent",
             headers={"X-Confirm-Delete": "true"},
+        )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestAdminRoutes:
+    """Tests for admin inspection endpoints."""
+
+    def test_get_admin_overview(self, client, mock_factory, mock_storage_service):
+        """Test dashboard overview aggregation."""
+        mock_document_db = MagicMock()
+
+        async def count_side_effect(collection: str, filters: dict[str, str]) -> int:
+            if collection == "videos":
+                return {
+                    "pending": 1,
+                    "downloading": 1,
+                    "transcribing": 0,
+                    "extracting": 0,
+                    "embedding": 0,
+                    "ready": 3,
+                    "failed": 1,
+                }.get(filters.get("status", ""), 0)
+
+            return {
+                "transcript_chunks": 9,
+                "frame_chunks": 107,
+                "audio_chunks": 4,
+                "video_chunks": 0,
+            }.get(collection, 0)
+
+        mock_document_db.count = AsyncMock(side_effect=count_side_effect)
+        mock_factory.get_document_db.return_value = mock_document_db
+        mock_storage_service.list_videos.return_value = [
+            MagicMock(created_at=datetime.now(UTC))
+        ]
+
+        response = client.get("/v1/admin/overview")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["total_videos"] == 6
+        assert data["videos_by_status"]["completed"] == 3
+        assert data["total_chunks"] == 120
+
+    def test_get_admin_video_detail(
+        self,
+        client,
+        mock_storage_service,
+    ):
+        """Test admin detail route for a stored video."""
+        mock_storage_service.get_video_metadata.return_value = VideoMetadata(
+            id="video-1",
+            youtube_id="abc123xyz89",
+            youtube_url="https://www.youtube.com/watch?v=abc123xyz89",
+            title="Test Video",
+            description="Demo video",
+            duration_seconds=125,
+            channel_name="Channel",
+            channel_id="channel-1",
+            upload_date=datetime.now(UTC),
+            thumbnail_url="https://img.youtube.com/demo.jpg",
+            status=VideoStatus.READY,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            transcript_chunk_count=4,
+            frame_chunk_count=12,
+            audio_chunk_count=2,
+            video_chunk_count=0,
+            blob_path_video="video-1/video.mp4",
+            blob_path_audio="video-1/audio.mp3",
+        )
+
+        response = client.get("/v1/admin/videos/video-1")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["chunk_counts"]["frame"] == 12
+        assert len(data["artifacts"]) == 3
+
+    def test_get_admin_video_chunks(
+        self,
+        client,
+        mock_storage_service,
+    ):
+        """Test chunk inspection route."""
+        mock_storage_service.get_video_metadata.return_value = VideoMetadata(
+            id="video-1",
+            youtube_id="abc123xyz89",
+            youtube_url="https://www.youtube.com/watch?v=abc123xyz89",
+            title="Test Video",
+            description="Demo video",
+            duration_seconds=125,
+            channel_name="Channel",
+            channel_id="channel-1",
+            upload_date=datetime.now(UTC),
+            thumbnail_url="https://img.youtube.com/demo.jpg",
+            status=VideoStatus.READY,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            transcript_chunk_count=1,
+            frame_chunk_count=0,
+            audio_chunk_count=0,
+            video_chunk_count=0,
+        )
+        mock_storage_service.get_chunks_for_video.return_value = [
+            TranscriptChunk(
+                id="chunk-1",
+                video_id="video-1",
+                start_time=0,
+                end_time=30,
+                text="Transcript text here",
+                language="en",
+                confidence=0.98,
+                blob_path="video-1/transcript/chunk-1.json",
+            )
+        ]
+
+        response = client.get(
+            "/v1/admin/videos/video-1/chunks",
+            params={"modality": "transcript"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["pagination"]["total_items"] == 1
+        assert data["chunks"][0]["id"] == "chunk-1"
+
+
+class TestAgentRoutes:
+    """Tests for the agent playground route."""
+
+    def test_chat_with_video_agent_success(self, client, mock_agent_playground_service):
+        """Test successful selected-video agent chat."""
+        mock_agent_playground_service.chat.return_value = AgentChatResult(
+            reply="The chorus starts around 00:42.",
+            response_id="resp_123",
+            tool_traces=[
+                AgentToolTrace(
+                    tool_name="query_selected_video",
+                    mcp_tool_name="query_video",
+                    arguments={"query": "When does the chorus start?"},
+                    result_preview='{"answer":"The chorus starts around 00:42."}',
+                )
+            ],
+        )
+
+        response = client.post(
+            "/v1/agent/videos/video-1/chat",
+            json={
+                "messages": [
+                    {"role": "user", "content": "When does the chorus start?"}
+                ]
+            },
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["reply"] == "The chorus starts around 00:42."
+        assert data["tool_traces"][0]["mcp_tool_name"] == "query_video"
+
+    def test_chat_with_video_agent_not_found(
+        self,
+        client,
+        mock_agent_playground_service,
+    ):
+        """Test agent chat for a non-existent video."""
+        mock_agent_playground_service.chat.side_effect = ValueError(
+            "Video not found: missing"
+        )
+
+        response = client.post(
+            "/v1/agent/videos/missing/chat",
+            json={"messages": [{"role": "user", "content": "hi"}]},
         )
 
         assert response.status_code == status.HTTP_404_NOT_FOUND

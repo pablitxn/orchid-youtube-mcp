@@ -1,5 +1,10 @@
 """Data Transfer Objects for application layer."""
 
+from src.application.dtos.agent import (
+    AgentChatMessageInput,
+    AgentChatResult,
+    AgentToolTrace,
+)
 from src.application.dtos.ingestion import (
     IngestionProgress,
     IngestionStatus,
@@ -26,6 +31,9 @@ from src.application.dtos.query import (
 )
 
 __all__ = [
+    "AgentChatMessageInput",
+    "AgentChatResult",
+    "AgentToolTrace",
     # Ingestion DTOs
     "IngestVideoRequest",
     "IngestVideoResponse",

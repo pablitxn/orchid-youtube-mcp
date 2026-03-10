@@ -5,10 +5,10 @@ from enum import Enum
 from typing import Annotated
 
 from fastapi import APIRouter, Header, Query, status
+from orchid_commons import APIError
 from pydantic import BaseModel, Field
 
 from src.adapters.dependencies import IngestionServiceDep
-from orchid_commons import APIError
 from src.application.dtos.ingestion import IngestionStatus
 from src.domain.models.video import VideoStatus
 
@@ -94,26 +94,33 @@ async def list_videos(
     ] = 20,
 ) -> VideoListResponse:
     """List indexed videos with pagination."""
-    # Convert status filter to VideoStatus if provided
-    video_status: VideoStatus | None = None
+    # Convert status filter to VideoStatus values if provided
+    video_statuses: list[VideoStatus] | None = None
     if status_filter and len(status_filter) == 1:
         status_map = {
-            "ready": VideoStatus.READY,
-            "processing": VideoStatus.DOWNLOADING,
-            "failed": VideoStatus.FAILED,
-            "pending": VideoStatus.PENDING,
+            "ready": [VideoStatus.READY],
+            "completed": [VideoStatus.READY],
+            "processing": [
+                VideoStatus.DOWNLOADING,
+                VideoStatus.TRANSCRIBING,
+                VideoStatus.EXTRACTING,
+                VideoStatus.EMBEDDING,
+            ],
+            "failed": [VideoStatus.FAILED],
+            "pending": [VideoStatus.PENDING],
         }
-        video_status = status_map.get(status_filter[0].lower())
+        video_statuses = status_map.get(status_filter[0].lower())
 
     # Calculate skip from page
     skip = (page - 1) * page_size
 
     # Get videos from service
     videos = await service.list_videos(
-        status=video_status,
+        statuses=video_statuses,
         skip=skip,
         limit=page_size,
     )
+    total_items = await service.count_videos(statuses=video_statuses)
 
     # Build response
     video_summaries = [
@@ -128,11 +135,6 @@ async def list_videos(
         )
         for v in videos
     ]
-
-    # For now, estimate total (proper implementation would count in DB)
-    total_items = len(videos) + skip
-    if len(videos) == page_size:
-        total_items += 1  # There might be more
 
     total_pages = (total_items + page_size - 1) // page_size
 
