@@ -134,7 +134,9 @@ class TestShutdownProcessObservability:
                 "src.infrastructure.runtime.load_shared_app_settings",
                 return_value=shared_settings,
             ),
-            patch("src.infrastructure.observability.bootstrap_logging_from_app_settings"),
+            patch(
+                "src.infrastructure.observability.bootstrap_logging_from_app_settings"
+            ),
             patch("src.infrastructure.observability.bootstrap_observability"),
             patch(
                 "src.infrastructure.observability.create_langfuse_client",

@@ -99,9 +99,7 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         "http error 403: forbidden",
         "fragment not found",
     )
-    _EMPTY_FILE_MARKERS: ClassVar[tuple[str, ...]] = (
-        "downloaded file is empty",
-    )
+    _EMPTY_FILE_MARKERS: ClassVar[tuple[str, ...]] = ("downloaded file is empty",)
 
     def __init__(
         self,

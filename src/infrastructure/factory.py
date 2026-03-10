@@ -1,4 +1,5 @@
 """Infrastructure factory for creating service instances from configuration."""
+
 from typing import TYPE_CHECKING, Any, cast
 
 from orchid_commons import ResourceManager
@@ -62,9 +63,8 @@ class InfrastructureFactory:
             Configured blob storage provider.
         """
         if "blob_storage" not in self._instances:
-            if (
-                self._resource_manager is not None
-                and self._resource_manager.has("multi_bucket")
+            if self._resource_manager is not None and self._resource_manager.has(
+                "multi_bucket"
             ):
                 managed_resource = self._resource_manager.get("multi_bucket")
                 if isinstance(managed_resource, BlobStorageAdapter):
@@ -77,19 +77,17 @@ class InfrastructureFactory:
                 return cast("BlobStorageAdapter", self._instances["blob_storage"])
 
             blob_settings = self._settings.blob_storage
-            self._instances["blob_storage"] = (
-                BlobStorageAdapter.from_settings(
-                    endpoint=blob_settings.endpoint,
-                    access_key=blob_settings.access_key,
-                    secret_key=blob_settings.secret_key,
-                    secure=blob_settings.use_ssl,
-                    region=blob_settings.region,
-                    buckets={
-                        "videos": blob_settings.buckets.videos,
-                        "chunks": blob_settings.buckets.chunks,
-                        "frames": blob_settings.buckets.frames,
-                    },
-                )
+            self._instances["blob_storage"] = BlobStorageAdapter.from_settings(
+                endpoint=blob_settings.endpoint,
+                access_key=blob_settings.access_key,
+                secret_key=blob_settings.secret_key,
+                secure=blob_settings.use_ssl,
+                region=blob_settings.region,
+                buckets={
+                    "videos": blob_settings.buckets.videos,
+                    "chunks": blob_settings.buckets.chunks,
+                    "frames": blob_settings.buckets.frames,
+                },
             )
         return cast("BlobStorageAdapter", self._instances["blob_storage"])
 
@@ -100,17 +98,14 @@ class InfrastructureFactory:
             Configured vector database provider.
         """
         if "vector_db" not in self._instances:
-            if (
-                self._resource_manager is not None
-                and self._resource_manager.has("qdrant")
+            if self._resource_manager is not None and self._resource_manager.has(
+                "qdrant"
             ):
                 managed_resource = self._resource_manager.get("qdrant")
                 if isinstance(managed_resource, VectorStoreAdapter):
                     self._instances["vector_db"] = managed_resource
                 else:
-                    self._instances["vector_db"] = VectorStoreAdapter(
-                        managed_resource
-                    )
+                    self._instances["vector_db"] = VectorStoreAdapter(managed_resource)
                 self._manager_owned_instances.add("vector_db")
                 return cast("VectorStoreAdapter", self._instances["vector_db"])
 
@@ -134,9 +129,8 @@ class InfrastructureFactory:
             Configured document database provider.
         """
         if "document_db" not in self._instances:
-            if (
-                self._resource_manager is not None
-                and self._resource_manager.has("mongodb")
+            if self._resource_manager is not None and self._resource_manager.has(
+                "mongodb"
             ):
                 managed_resource = self._resource_manager.get("mongodb")
                 if isinstance(managed_resource, DocumentStoreAdapter):

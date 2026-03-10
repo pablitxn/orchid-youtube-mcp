@@ -90,7 +90,9 @@ class TestOpenAIWhisperTranscription:
         audio_path = tmp_path / "audio.mp3"
         audio_path.write_bytes(b"x" * 16)
 
-        request = httpx.Request("POST", "https://api.openai.com/v1/audio/transcriptions")
+        request = httpx.Request(
+            "POST", "https://api.openai.com/v1/audio/transcriptions"
+        )
         response = httpx.Response(status_code=413, request=request)
         too_large = APIStatusError(
             "too large",
