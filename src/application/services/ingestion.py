@@ -587,6 +587,21 @@ class VideoIngestionService:
                 details=e.details,
             ) from e
 
+        except IngestionError as e:
+            self._logger.error(
+                "Ingestion stage failed",
+                extra={
+                    "url": request.url,
+                    "video_id": video_metadata.id if video_metadata else None,
+                    "step": e.step.value,
+                    "error": str(e),
+                    "error_code": e.code,
+                },
+            )
+            if video_metadata:
+                await self._mark_failed(video_metadata, str(e))
+            raise
+
         except Exception as e:
             self._logger.exception(
                 "Ingestion failed with unexpected error",
@@ -923,11 +938,17 @@ class VideoIngestionService:
 
             # Transcribe
             self._logger.debug("Calling transcription service")
-            transcription = await self._transcriber.transcribe(
-                audio_path=str(audio_local_path),
-                language_hint=language_hint,
-                word_timestamps=True,
-            )
+            try:
+                transcription = await self._transcriber.transcribe(
+                    audio_path=str(audio_local_path),
+                    language_hint=language_hint,
+                    word_timestamps=True,
+                )
+            except Exception as exc:
+                raise IngestionError(
+                    f"Transcription failed: {exc}",
+                    ProcessingStep.TRANSCRIBING,
+                ) from exc
 
             self._logger.debug(
                 "Transcription service returned",

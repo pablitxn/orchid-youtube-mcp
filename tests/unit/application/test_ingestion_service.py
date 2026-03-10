@@ -554,6 +554,7 @@ class TestErrorHandling:
         with pytest.raises(IngestionError) as exc_info:
             await ingestion_service.ingest(request)
 
+        assert exc_info.value.step == ProcessingStep.TRANSCRIBING
         assert "Transcription API error" in str(exc_info.value)
 
         # Verify video was marked as failed
