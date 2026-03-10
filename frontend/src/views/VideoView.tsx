@@ -319,7 +319,7 @@ export function VideoView() {
             </div>
           </section>
 
-          <section className="panel">
+          <section className="panel panel-body">
             <div className="section-heading">
               <div>
                 <p className="eyebrow">Indexed timeline</p>
@@ -362,7 +362,7 @@ export function VideoView() {
             </div>
           </section>
 
-          <section className="panel">
+          <section className="panel panel-body">
             <div className="section-heading">
               <div>
                 <p className="eyebrow">Query playground</p>
