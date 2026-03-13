@@ -25,6 +25,7 @@ from src.application.dtos.query import (
 from src.application.dtos.youtube_auth import (
     AudioDownloadPreset,
     PreparedYouTubeAudioDownload,
+    SavedYouTubeAudioDownload,
     YouTubeAuthMode,
     YouTubeAuthStatus,
     YouTubeDownloadTestResult,
@@ -796,6 +797,119 @@ class TestAdminRoutes:
         payload = response.json()
         assert payload["error"]["code"] == "YOUTUBE_AUTH_INVALID"
         assert payload["error"]["details"]["kind"] == "auth_invalid"
+
+    def test_list_saved_audio_downloads(self, client, mock_youtube_auth_service):
+        """Test listing persisted audio downloads."""
+        mock_youtube_auth_service.list_saved_audio_downloads.return_value = [
+            SavedYouTubeAudioDownload(
+                id="download-1",
+                youtube_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                youtube_id="dQw4w9WgXcQ",
+                title="Never Gonna Give You Up",
+                channel_name="Rick Astley",
+                duration_seconds=213,
+                auth_mode=YouTubeAuthMode.MANAGED_COOKIE,
+                preset=AudioDownloadPreset.MP3_192,
+                audio_format="mp3",
+                audio_quality="192",
+                filename="never-gonna-give-you-up-dQw4w9WgXcQ.mp3",
+                file_size_bytes=1_048_576,
+                bucket="videos",
+                blob_path="audio-downloads/dQw4w9WgXcQ/download-1/file.mp3",
+            )
+        ]
+
+        response = client.get("/v1/admin/youtube-auth/audio-downloads")
+
+        assert response.status_code == status.HTTP_200_OK
+        payload = response.json()
+        assert payload["total_items"] == 1
+        assert payload["downloads"][0]["id"] == "download-1"
+
+    def test_create_saved_audio_download(self, client, mock_youtube_auth_service):
+        """Test creating a persisted audio download."""
+        mock_youtube_auth_service.create_saved_audio_download.return_value = (
+            SavedYouTubeAudioDownload(
+                id="download-1",
+                youtube_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                youtube_id="dQw4w9WgXcQ",
+                title="Never Gonna Give You Up",
+                channel_name="Rick Astley",
+                duration_seconds=213,
+                auth_mode=YouTubeAuthMode.MANAGED_COOKIE,
+                preset=AudioDownloadPreset.MP3_192,
+                audio_format="mp3",
+                audio_quality="192",
+                filename="never-gonna-give-you-up-dQw4w9WgXcQ.mp3",
+                file_size_bytes=1_048_576,
+                bucket="videos",
+                blob_path="audio-downloads/dQw4w9WgXcQ/download-1/file.mp3",
+            )
+        )
+
+        response = client.post(
+            "/v1/admin/youtube-auth/audio-downloads",
+            json={
+                "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "preset": AudioDownloadPreset.MP3_192.value,
+            },
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        payload = response.json()
+        assert payload["id"] == "download-1"
+        assert payload["filename"].endswith(".mp3")
+
+    def test_download_saved_audio(self, client, mock_youtube_auth_service):
+        """Test streaming a persisted audio download."""
+
+        async def fake_stream():
+            yield b"saved "
+            yield b"audio"
+
+        mock_youtube_auth_service.open_saved_audio_download.return_value = (
+            SavedYouTubeAudioDownload(
+                id="download-1",
+                youtube_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                youtube_id="dQw4w9WgXcQ",
+                title="Never Gonna Give You Up",
+                channel_name="Rick Astley",
+                duration_seconds=213,
+                auth_mode=YouTubeAuthMode.MANAGED_COOKIE,
+                preset=AudioDownloadPreset.MP3_192,
+                audio_format="mp3",
+                audio_quality="192",
+                filename="never-gonna-give-you-up-dQw4w9WgXcQ.mp3",
+                file_size_bytes=1_048_576,
+                bucket="videos",
+                blob_path="audio-downloads/dQw4w9WgXcQ/download-1/file.mp3",
+            ),
+            fake_stream(),
+        )
+
+        response = client.get(
+            "/v1/admin/youtube-auth/audio-downloads/download-1/download",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.content == b"saved audio"
+        assert response.headers["content-type"] == "audio/mpeg"
+        assert "never-gonna-give-you-up-dQw4w9WgXcQ.mp3" in (
+            response.headers["content-disposition"]
+        )
+
+    def test_delete_saved_audio(self, client, mock_youtube_auth_service):
+        """Test deleting a persisted audio download."""
+        mock_youtube_auth_service.delete_saved_audio_download.return_value = True
+
+        response = client.delete(
+            "/v1/admin/youtube-auth/audio-downloads/download-1",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        payload = response.json()
+        assert payload["success"] is True
+        assert payload["download_id"] == "download-1"
 
 
 class TestAgentRoutes:

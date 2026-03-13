@@ -233,6 +233,30 @@ export interface YouTubeDownloadTestResult {
   note: string;
 }
 
+export interface SavedAudioDownload {
+  id: string;
+  kind: string;
+  youtube_url: string;
+  youtube_id: string;
+  title: string;
+  channel_name: string;
+  duration_seconds: number;
+  auth_mode: YouTubeAuthMode;
+  preset: AudioDownloadPreset;
+  audio_format: string;
+  audio_quality: string;
+  filename: string;
+  file_size_bytes: number;
+  bucket: string;
+  blob_path: string;
+  created_at: string;
+}
+
+export interface SavedAudioDownloadListResponse {
+  downloads: SavedAudioDownload[];
+  total_items: number;
+}
+
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)
   ?.replace(/\/$/, "") ?? "";
 
@@ -448,4 +472,30 @@ export async function downloadYouTubeAudio(payload: {
     filename,
     authMode: response.headers.get("X-YouTube-Auth-Mode") as YouTubeAuthMode | null,
   };
+}
+
+export async function listSavedAudioDownloads(): Promise<SavedAudioDownloadListResponse> {
+  return request<SavedAudioDownloadListResponse>(
+    "/v1/admin/youtube-auth/audio-downloads",
+  );
+}
+
+export async function createSavedAudioDownload(payload: {
+  youtube_url: string;
+  preset: AudioDownloadPreset;
+}): Promise<SavedAudioDownload> {
+  return request<SavedAudioDownload>("/v1/admin/youtube-auth/audio-downloads", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteSavedAudioDownload(downloadId: string): Promise<void> {
+  await request(`/v1/admin/youtube-auth/audio-downloads/${downloadId}`, {
+    method: "DELETE",
+  });
+}
+
+export function getSavedAudioDownloadUrl(downloadId: string): string {
+  return `${API_BASE}/v1/admin/youtube-auth/audio-downloads/${downloadId}/download`;
 }

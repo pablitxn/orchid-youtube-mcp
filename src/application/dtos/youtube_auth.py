@@ -90,6 +90,36 @@ class PreparedYouTubeAudioDownload:
     cleanup_dir: Path
 
 
+class SavedYouTubeAudioDownload(BaseModel):
+    """Persisted audio-only download stored in blob storage."""
+
+    id: str = Field(description="Persistent download identifier")
+    kind: str = Field(default="saved_audio_download")
+    youtube_url: str = Field(description="Original YouTube URL")
+    youtube_id: str = Field(description="Resolved YouTube video ID")
+    title: str = Field(description="Resolved video title")
+    channel_name: str = Field(description="Resolved channel name")
+    duration_seconds: int = Field(ge=0, description="Video duration in seconds")
+    auth_mode: YouTubeAuthMode = Field(
+        description="Authentication mode active when the download was created"
+    )
+    preset: AudioDownloadPreset = Field(description="Saved preset identifier")
+    audio_format: str = Field(description="Stored audio file format")
+    audio_quality: str = Field(description="Stored audio quality string")
+    filename: str = Field(description="Suggested browser filename")
+    file_size_bytes: int = Field(ge=0, description="Stored blob size in bytes")
+    bucket: str = Field(description="Blob bucket used for the stored file")
+    blob_path: str = Field(description="Blob path for the stored file")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class SavedYouTubeAudioDownloadList(BaseModel):
+    """List response for saved audio-only downloads."""
+
+    downloads: list[SavedYouTubeAudioDownload] = Field(default_factory=list)
+    total_items: int = Field(ge=0)
+
+
 class YouTubeDownloadTestResult(BaseModel):
     """Result of an ephemeral yt-dlp download diagnostic."""
 

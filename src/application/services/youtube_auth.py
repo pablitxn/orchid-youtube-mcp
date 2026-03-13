@@ -8,6 +8,7 @@ from pathlib import Path
 from tempfile import mkdtemp
 from time import perf_counter
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -15,6 +16,7 @@ from src.application.dtos.youtube_auth import (
     AudioDownloadPreset,
     ManagedYouTubeCookie,
     PreparedYouTubeAudioDownload,
+    SavedYouTubeAudioDownload,
     YouTubeAuthMode,
     YouTubeAuthStatus,
     YouTubeDownloadTestResult,
@@ -22,6 +24,8 @@ from src.application.dtos.youtube_auth import (
 from src.infrastructure.youtube.downloader import YtDlpDownloader
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from src.infrastructure.adapters.document import DocumentStoreAdapter
     from src.infrastructure.factory import InfrastructureFactory
     from src.infrastructure.settings.models import Settings
@@ -59,6 +63,8 @@ _AUDIO_DOWNLOAD_PRESETS: dict[AudioDownloadPreset, _AudioDownloadPresetSpec] = {
         audio_quality="160",
     ),
 }
+_AUDIO_DOWNLOAD_DOCUMENT_KIND = "saved_audio_download"
+_AUDIO_DOWNLOAD_PREFIX = "audio-downloads"
 
 
 class YouTubeAuthService:
@@ -79,6 +85,7 @@ class YouTubeAuthService:
         self._collection = settings.document_db.collections.app_state
         self._runtime_file = Path(settings.youtube.managed_cookies_file)
         self._encryption_key = settings.youtube.managed_cookies_encryption_key
+        self._downloads_bucket = settings.blob_storage.buckets.videos
 
     async def bootstrap_runtime_cookie_file(self) -> None:
         """Restore the managed cookie file into the pod filesystem on startup."""
@@ -218,6 +225,144 @@ class YouTubeAuthService:
             cleanup_dir=temp_dir,
         )
 
+    async def create_saved_audio_download(
+        self,
+        *,
+        youtube_url: str,
+        preset: AudioDownloadPreset,
+    ) -> SavedYouTubeAudioDownload:
+        """Persist an audio-only download into blob storage and app_state."""
+        prepared_download = await self.prepare_audio_download(
+            youtube_url=youtube_url,
+            preset=preset,
+        )
+        blob_storage = self._factory.get_blob_storage()
+        download_id = uuid4().hex
+        filename = _build_audio_download_filename(
+            prepared_download.title,
+            prepared_download.youtube_id,
+            prepared_download.audio_format,
+        )
+        blob_path = (
+            f"{_AUDIO_DOWNLOAD_PREFIX}/{prepared_download.youtube_id}/"
+            f"{download_id}/{filename}"
+        )
+        file_size_bytes = (
+            prepared_download.file_path.stat().st_size
+            if prepared_download.file_path.exists()
+            else 0
+        )
+
+        try:
+            with prepared_download.file_path.open("rb") as audio_file:
+                await blob_storage.upload(
+                    self._downloads_bucket,
+                    blob_path,
+                    audio_file,
+                    content_type=_audio_media_type(prepared_download.audio_format),
+                    metadata={
+                        "youtube_id": prepared_download.youtube_id,
+                        "preset": preset.value,
+                    },
+                )
+
+            saved_download = SavedYouTubeAudioDownload(
+                id=download_id,
+                kind=_AUDIO_DOWNLOAD_DOCUMENT_KIND,
+                youtube_url=youtube_url,
+                youtube_id=prepared_download.youtube_id,
+                title=prepared_download.title,
+                channel_name=prepared_download.channel_name,
+                duration_seconds=prepared_download.duration_seconds,
+                auth_mode=prepared_download.auth_mode,
+                preset=preset,
+                audio_format=prepared_download.audio_format,
+                audio_quality=prepared_download.audio_quality,
+                filename=filename,
+                file_size_bytes=file_size_bytes,
+                bucket=self._downloads_bucket,
+                blob_path=blob_path,
+            )
+
+            await self._document_db.insert(
+                self._collection,
+                saved_download.model_dump(mode="json"),
+            )
+            return saved_download
+        except Exception:
+            if await blob_storage.exists(self._downloads_bucket, blob_path):
+                await blob_storage.delete(self._downloads_bucket, blob_path)
+            raise
+        finally:
+            shutil.rmtree(prepared_download.cleanup_dir, ignore_errors=True)
+
+    async def list_saved_audio_downloads(
+        self,
+        *,
+        limit: int = 200,
+    ) -> list[SavedYouTubeAudioDownload]:
+        """List persisted audio-only downloads newest first."""
+        documents = await self._document_db.find(
+            self._collection,
+            {"kind": _AUDIO_DOWNLOAD_DOCUMENT_KIND},
+            skip=0,
+            limit=limit,
+            sort=[("created_at", -1)],
+        )
+        return [SavedYouTubeAudioDownload(**document) for document in documents]
+
+    async def get_saved_audio_download(
+        self,
+        *,
+        download_id: str,
+    ) -> SavedYouTubeAudioDownload | None:
+        """Fetch a persisted audio-only download by ID."""
+        document = await self._document_db.find_by_id(self._collection, download_id)
+        if document is None or document.get("kind") != _AUDIO_DOWNLOAD_DOCUMENT_KIND:
+            return None
+        return SavedYouTubeAudioDownload(**document)
+
+    async def open_saved_audio_download(
+        self,
+        *,
+        download_id: str,
+    ) -> tuple[SavedYouTubeAudioDownload, AsyncIterator[bytes]] | None:
+        """Resolve a saved download and its blob stream for browser delivery."""
+        saved_download = await self.get_saved_audio_download(download_id=download_id)
+        if saved_download is None:
+            return None
+
+        blob_storage = self._factory.get_blob_storage()
+        if not await blob_storage.exists(
+            saved_download.bucket,
+            saved_download.blob_path,
+        ):
+            return None
+
+        return (
+            saved_download,
+            blob_storage.download_stream(
+                saved_download.bucket,
+                saved_download.blob_path,
+            ),
+        )
+
+    async def delete_saved_audio_download(
+        self,
+        *,
+        download_id: str,
+    ) -> bool:
+        """Delete a persisted audio-only download from storage and app_state."""
+        saved_download = await self.get_saved_audio_download(download_id=download_id)
+        if saved_download is None:
+            return False
+
+        blob_storage = self._factory.get_blob_storage()
+        if await blob_storage.exists(saved_download.bucket, saved_download.blob_path):
+            await blob_storage.delete(saved_download.bucket, saved_download.blob_path)
+
+        return await self._document_db.delete(self._collection, download_id)
+
     async def test_download(self, *, youtube_url: str) -> YouTubeDownloadTestResult:
         """Run an ephemeral audio-only download to verify yt-dlp access."""
         started_at = perf_counter()
@@ -306,6 +451,28 @@ class YouTubeAuthService:
             return cipher.decrypt(encrypted_cookie_text.encode("utf-8")).decode("utf-8")
         except (InvalidToken, ValueError):
             return None
+
+
+def _build_audio_download_filename(
+    title: str,
+    youtube_id: str,
+    audio_format: str,
+) -> str:
+    """Create a predictable filename for stored audio downloads."""
+    import re
+
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", title).strip("-").lower()
+    stem = slug[:80] or youtube_id
+    return f"{stem}-{youtube_id}.{audio_format}"
+
+
+def _audio_media_type(audio_format: str) -> str:
+    """Map response media types for the supported audio presets."""
+    if audio_format == "m4a":
+        return "audio/mp4"
+    if audio_format == "opus":
+        return "audio/ogg"
+    return "audio/mpeg"
 
 
 def _normalize_cookie_text(value: str) -> str:
