@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query, status
 from orchid_commons import APIError
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, StreamingResponse
 
 from src.adapters.dependencies import (
     FactoryDep,
@@ -19,6 +19,8 @@ from src.adapters.dependencies import (
 from src.application.dtos.ingestion import IngestionStatus
 from src.application.dtos.youtube_auth import (
     AudioDownloadPreset,
+    SavedYouTubeAudioDownload,
+    SavedYouTubeAudioDownloadList,
     YouTubeAuthStatus,
     YouTubeDownloadTestResult,
 )
@@ -182,6 +184,13 @@ class BrowserAudioDownloadRequest(BaseModel):
         default=AudioDownloadPreset.MP3_192,
         description="Audio download preset",
     )
+
+
+class SavedAudioDownloadDeleteResponse(BaseModel):
+    """Delete response for persisted audio downloads."""
+
+    success: bool = Field(description="Whether the delete operation succeeded")
+    download_id: str = Field(description="Deleted persistent download identifier")
 
 
 class YouTubeDownloadTestRequest(BaseModel):
@@ -509,6 +518,124 @@ async def download_youtube_audio(
             _cleanup_prepared_audio_download,
             str(prepared_download.cleanup_dir),
         ),
+    )
+
+
+@router.get(
+    "/admin/youtube-auth/audio-downloads",
+    response_model=SavedYouTubeAudioDownloadList,
+    summary="List saved audio downloads",
+    description="List persisted audio-only downloads stored for later reuse.",
+)
+async def list_saved_audio_downloads(
+    service: YouTubeAuthServiceDep,
+) -> SavedYouTubeAudioDownloadList:
+    """List persisted audio downloads newest first."""
+    downloads = await service.list_saved_audio_downloads()
+    return SavedYouTubeAudioDownloadList(
+        downloads=downloads,
+        total_items=len(downloads),
+    )
+
+
+@router.post(
+    "/admin/youtube-auth/audio-downloads",
+    response_model=SavedYouTubeAudioDownload,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create saved audio download",
+    description=(
+        "Download audio-only media with the current managed cookie state, persist "
+        "it in blob storage, and register it in the audio-download history."
+    ),
+)
+async def create_saved_audio_download(
+    request: BrowserAudioDownloadRequest,
+    service: YouTubeAuthServiceDep,
+) -> SavedYouTubeAudioDownload:
+    """Persist a YouTube audio-only download."""
+    try:
+        return await service.create_saved_audio_download(
+            youtube_url=request.youtube_url,
+            preset=request.preset,
+        )
+    except ValueError as exc:
+        raise APIError(
+            code="INVALID_YOUTUBE_URL",
+            message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        ) from exc
+    except VideoNotFoundError as exc:
+        raise APIError(
+            code="YOUTUBE_VIDEO_NOT_FOUND",
+            message=str(exc),
+            status_code=status.HTTP_404_NOT_FOUND,
+        ) from exc
+    except DownloadError as exc:
+        raise APIError(
+            code=exc.code,
+            message=str(exc),
+            status_code=exc.status_code,
+            details=exc.details,
+        ) from exc
+
+
+@router.get(
+    "/admin/youtube-auth/audio-downloads/{download_id}/download",
+    response_class=StreamingResponse,
+    summary="Download a saved audio artifact",
+    description="Stream a persisted audio-only download from blob storage.",
+)
+async def download_saved_audio(
+    download_id: str,
+    service: YouTubeAuthServiceDep,
+) -> StreamingResponse:
+    """Stream a persisted audio download from blob storage."""
+    opened_download = await service.open_saved_audio_download(download_id=download_id)
+    if opened_download is None:
+        raise APIError(
+            code="AUDIO_DOWNLOAD_NOT_FOUND",
+            message=f"Saved audio download '{download_id}' was not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+            details={"download_id": download_id},
+        )
+
+    saved_download, blob_stream = opened_download
+    return StreamingResponse(
+        blob_stream,
+        media_type=_audio_media_type(saved_download.audio_format),
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{saved_download.filename}"'
+            )
+        },
+    )
+
+
+@router.delete(
+    "/admin/youtube-auth/audio-downloads/{download_id}",
+    response_model=SavedAudioDownloadDeleteResponse,
+    summary="Delete a saved audio artifact",
+    description=(
+        "Delete a persisted audio-only download from blob storage and metadata."
+    ),
+)
+async def delete_saved_audio(
+    download_id: str,
+    service: YouTubeAuthServiceDep,
+) -> SavedAudioDownloadDeleteResponse:
+    """Delete a persisted audio download."""
+    deleted = await service.delete_saved_audio_download(download_id=download_id)
+    if not deleted:
+        raise APIError(
+            code="AUDIO_DOWNLOAD_NOT_FOUND",
+            message=f"Saved audio download '{download_id}' was not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+            details={"download_id": download_id},
+        )
+
+    return SavedAudioDownloadDeleteResponse(
+        success=True,
+        download_id=download_id,
     )
 
 
