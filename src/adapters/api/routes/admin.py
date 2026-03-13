@@ -604,9 +604,7 @@ async def download_saved_audio(
         blob_stream,
         media_type=_audio_media_type(saved_download.audio_format),
         headers={
-            "Content-Disposition": (
-                f'attachment; filename="{saved_download.filename}"'
-            )
+            "Content-Disposition": (f'attachment; filename="{saved_download.filename}"')
         },
     )
 
