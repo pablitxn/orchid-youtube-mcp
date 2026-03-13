@@ -894,8 +894,9 @@ class TestAdminRoutes:
         assert response.status_code == status.HTTP_200_OK
         assert response.content == b"saved audio"
         assert response.headers["content-type"] == "audio/mpeg"
-        assert "never-gonna-give-you-up-dQw4w9WgXcQ.mp3" in (
-            response.headers["content-disposition"]
+        assert (
+            "never-gonna-give-you-up-dQw4w9WgXcQ.mp3"
+            in (response.headers["content-disposition"])
         )
 
     def test_delete_saved_audio(self, client, mock_youtube_auth_service):
