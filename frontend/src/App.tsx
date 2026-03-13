@@ -1,6 +1,7 @@
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 
 import { AgentPlaygroundView } from "./views/AgentPlaygroundView";
+import { AudioDownloadView } from "./views/AudioDownloadView";
 import { HomeView } from "./views/HomeView";
 import { VideoView } from "./views/VideoView";
 
@@ -21,6 +22,7 @@ export default function App() {
           <NavLink to="/" end>
             Library
           </NavLink>
+          <NavLink to="/audio">Audio</NavLink>
           <NavLink to="/agent">Agent</NavLink>
           <a href="/docs" target="_blank" rel="noreferrer">
             API docs
@@ -31,6 +33,7 @@ export default function App() {
       <main className="main-content">
         <Routes>
           <Route path="/" element={<HomeView />} />
+          <Route path="/audio" element={<AudioDownloadView />} />
           <Route path="/agent" element={<AgentPlaygroundView />} />
           <Route path="/videos/:videoId" element={<VideoView />} />
         </Routes>

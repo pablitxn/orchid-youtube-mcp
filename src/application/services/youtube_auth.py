@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import mkdtemp
 from time import perf_counter
 from typing import TYPE_CHECKING
 
 from cryptography.fernet import Fernet, InvalidToken
 
 from src.application.dtos.youtube_auth import (
+    AudioDownloadPreset,
     ManagedYouTubeCookie,
+    PreparedYouTubeAudioDownload,
     YouTubeAuthMode,
     YouTubeAuthStatus,
     YouTubeDownloadTestResult,
@@ -30,6 +33,32 @@ class _CookieSummary:
     domain_count: int
     contains_youtube_domains: bool
     has_login_cookie_names: bool
+
+
+@dataclass(frozen=True)
+class _AudioDownloadPresetSpec:
+    audio_format: str
+    audio_quality: str
+
+
+_AUDIO_DOWNLOAD_PRESETS: dict[AudioDownloadPreset, _AudioDownloadPresetSpec] = {
+    AudioDownloadPreset.MP3_128: _AudioDownloadPresetSpec(
+        audio_format="mp3",
+        audio_quality="128",
+    ),
+    AudioDownloadPreset.MP3_192: _AudioDownloadPresetSpec(
+        audio_format="mp3",
+        audio_quality="192",
+    ),
+    AudioDownloadPreset.M4A_128: _AudioDownloadPresetSpec(
+        audio_format="m4a",
+        audio_quality="128",
+    ),
+    AudioDownloadPreset.OPUS_160: _AudioDownloadPresetSpec(
+        audio_format="opus",
+        audio_quality="160",
+    ),
+}
 
 
 class YouTubeAuthService:
@@ -145,8 +174,13 @@ class YouTubeAuthService:
         self._disable_auth()
         return await self.get_status()
 
-    async def test_download(self, *, youtube_url: str) -> YouTubeDownloadTestResult:
-        """Run an ephemeral audio-only download to verify yt-dlp access."""
+    async def prepare_audio_download(
+        self,
+        *,
+        youtube_url: str,
+        preset: AudioDownloadPreset,
+    ) -> PreparedYouTubeAudioDownload:
+        """Download audio into a temporary directory for browser delivery."""
         downloader = self._factory.get_youtube_downloader()
         if not downloader.validate_url(youtube_url):
             raise ValueError(
@@ -157,34 +191,65 @@ class YouTubeAuthService:
         scratch_root = self._runtime_file.parent
         scratch_root.mkdir(parents=True, exist_ok=True)
 
-        started_at = perf_counter()
-        with TemporaryDirectory(prefix="download-test-", dir=scratch_root) as temp_dir:
+        preset_spec = _AUDIO_DOWNLOAD_PRESETS[preset]
+        temp_dir = Path(mkdtemp(prefix="browser-audio-", dir=scratch_root))
+
+        try:
             artifact_path, metadata = await downloader.download_audio_only(
                 youtube_url,
-                Path(temp_dir),
-                audio_format="mp3",
-                audio_quality="128",
+                temp_dir,
+                audio_format=preset_spec.audio_format,
+                audio_quality=preset_spec.audio_quality,
             )
+        except Exception:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
+
+        return PreparedYouTubeAudioDownload(
+            youtube_url=youtube_url,
+            youtube_id=metadata.id,
+            title=metadata.title,
+            channel_name=metadata.channel_name,
+            duration_seconds=metadata.duration_seconds,
+            auth_mode=auth_status.mode,
+            audio_format=preset_spec.audio_format,
+            audio_quality=preset_spec.audio_quality,
+            file_path=artifact_path,
+            cleanup_dir=temp_dir,
+        )
+
+    async def test_download(self, *, youtube_url: str) -> YouTubeDownloadTestResult:
+        """Run an ephemeral audio-only download to verify yt-dlp access."""
+        started_at = perf_counter()
+        prepared_download = await self.prepare_audio_download(
+            youtube_url=youtube_url,
+            preset=AudioDownloadPreset.MP3_128,
+        )
+
+        try:
             elapsed_ms = int((perf_counter() - started_at) * 1000)
             downloaded_bytes = (
-                artifact_path.stat().st_size if artifact_path.exists() else 0
+                prepared_download.file_path.stat().st_size
+                if prepared_download.file_path.exists()
+                else 0
             )
-
             return YouTubeDownloadTestResult(
                 youtube_url=youtube_url,
-                youtube_id=metadata.id,
-                title=metadata.title,
-                channel_name=metadata.channel_name,
-                duration_seconds=metadata.duration_seconds,
-                auth_mode=auth_status.mode,
+                youtube_id=prepared_download.youtube_id,
+                title=prepared_download.title,
+                channel_name=prepared_download.channel_name,
+                duration_seconds=prepared_download.duration_seconds,
+                auth_mode=prepared_download.auth_mode,
                 downloaded_bytes=downloaded_bytes,
-                artifact_name=artifact_path.name,
+                artifact_name=prepared_download.file_path.name,
                 elapsed_ms=elapsed_ms,
                 note=(
                     "Audio-only media was fetched to a temporary directory and "
                     "deleted immediately after verification."
                 ),
             )
+        finally:
+            shutil.rmtree(prepared_download.cleanup_dir, ignore_errors=True)
 
     async def _get_stored_cookie(self) -> ManagedYouTubeCookie | None:
         document = await self._document_db.find_by_id(

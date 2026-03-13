@@ -197,6 +197,11 @@ export interface AgentChatResponse {
 }
 
 export type YouTubeAuthMode = "managed_cookie" | "none";
+export type AudioDownloadPreset =
+  | "mp3_128"
+  | "mp3_192"
+  | "m4a_128"
+  | "opus_160";
 
 export interface YouTubeAuthStatus {
   mode: YouTubeAuthMode;
@@ -231,6 +236,29 @@ export interface YouTubeDownloadTestResult {
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)
   ?.replace(/\/$/, "") ?? "";
 
+async function getErrorMessage(response: Response): Promise<string> {
+  let message = `Request failed with status ${response.status}`;
+  try {
+    const errorPayload = (await response.json()) as {
+      message?: string;
+      detail?: string;
+      error?: {
+        message?: string;
+        detail?: string;
+      };
+    };
+    message =
+      errorPayload.error?.message ||
+      errorPayload.error?.detail ||
+      errorPayload.message ||
+      errorPayload.detail ||
+      message;
+  } catch {
+    // Ignore JSON parsing issues for non-JSON error responses.
+  }
+  return message;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
@@ -242,29 +270,29 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    let message = `Request failed with status ${response.status}`;
-    try {
-      const errorPayload = (await response.json()) as {
-        message?: string;
-        detail?: string;
-        error?: {
-          message?: string;
-          detail?: string;
-        };
-      };
-      message =
-        errorPayload.error?.message ||
-        errorPayload.error?.detail ||
-        errorPayload.message ||
-        errorPayload.detail ||
-        message;
-    } catch {
-      // Ignore JSON parsing issues for non-JSON error responses.
-    }
-    throw new Error(message);
+    throw new Error(await getErrorMessage(response));
   }
 
   return (await response.json()) as T;
+}
+
+function extractFilename(contentDisposition: string | null): string | null {
+  if (contentDisposition === null) {
+    return null;
+  }
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+
+  const quotedMatch = contentDisposition.match(/filename="([^"]+)"/i);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1];
+  }
+
+  const plainMatch = contentDisposition.match(/filename=([^;]+)/i);
+  return plainMatch?.[1]?.trim() ?? null;
 }
 
 export async function getAdminOverview(): Promise<OverviewResponse> {
@@ -381,4 +409,43 @@ export async function runYouTubeDownloadTest(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function downloadYouTubeAudio(payload: {
+  youtube_url: string;
+  preset: AudioDownloadPreset;
+}): Promise<{
+  filename: string | null;
+  authMode: YouTubeAuthMode | null;
+}> {
+  const response = await fetch(`${API_BASE}/v1/admin/youtube-auth/download-audio`, {
+    method: "POST",
+    headers: {
+      Accept: "audio/*,application/octet-stream",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const filename = extractFilename(response.headers.get("Content-Disposition"));
+  const anchor = document.createElement("a");
+
+  anchor.href = objectUrl;
+  anchor.download = filename ?? `youtube-audio.${payload.preset.split("_")[0]}`;
+  anchor.style.display = "none";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+
+  return {
+    filename,
+    authMode: response.headers.get("X-YouTube-Auth-Mode") as YouTubeAuthMode | null,
+  };
 }

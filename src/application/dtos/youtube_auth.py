@@ -1,7 +1,9 @@
 """DTOs for managed YouTube authentication state."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +13,15 @@ class YouTubeAuthMode(str, Enum):
 
     MANAGED_COOKIE = "managed_cookie"
     NONE = "none"
+
+
+class AudioDownloadPreset(str, Enum):
+    """Supported browser-download presets for audio-only fetches."""
+
+    MP3_128 = "mp3_128"
+    MP3_192 = "mp3_192"
+    M4A_128 = "m4a_128"
+    OPUS_160 = "opus_160"
 
 
 class YouTubeAuthStatus(BaseModel):
@@ -61,6 +72,22 @@ class ManagedYouTubeCookie(BaseModel):
     contains_youtube_domains: bool = Field(default=False)
     has_login_cookie_names: bool = Field(default=False)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class PreparedYouTubeAudioDownload:
+    """Ephemeral audio download prepared for direct browser delivery."""
+
+    youtube_url: str
+    youtube_id: str
+    title: str
+    channel_name: str
+    duration_seconds: int
+    auth_mode: YouTubeAuthMode
+    audio_format: str
+    audio_quality: str
+    file_path: Path
+    cleanup_dir: Path
 
 
 class YouTubeDownloadTestResult(BaseModel):

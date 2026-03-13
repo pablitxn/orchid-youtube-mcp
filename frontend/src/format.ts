@@ -1,4 +1,4 @@
-import type { IngestionStatus } from "./api";
+import type { IngestionStatus, YouTubeAuthMode } from "./api";
 
 export function formatDateTime(value: string | null): string {
   if (value === null) {
@@ -54,4 +54,37 @@ export function statusTone(status: IngestionStatus | string): string {
     default:
       return "neutral";
   }
+}
+
+export function formatYouTubeAuthMode(mode: YouTubeAuthMode): string {
+  return mode.replace(/_/g, " ");
+}
+
+export function youtubeAuthTone(mode: YouTubeAuthMode): string {
+  switch (mode) {
+    case "managed_cookie":
+      return "success";
+    default:
+      return "neutral";
+  }
+}
+
+export function formatBytes(value: number): string {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function formatElapsed(value: number): string {
+  if (value < 1000) {
+    return `${value} ms`;
+  }
+
+  return `${(value / 1000).toFixed(1)} s`;
 }
