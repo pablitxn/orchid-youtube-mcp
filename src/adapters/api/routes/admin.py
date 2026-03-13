@@ -1,11 +1,14 @@
 """Administrative inspection endpoints for the human UI."""
 
+import re
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Query, status
 from orchid_commons import APIError
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
+from starlette.responses import FileResponse
 
 from src.adapters.dependencies import (
     FactoryDep,
@@ -15,6 +18,7 @@ from src.adapters.dependencies import (
 )
 from src.application.dtos.ingestion import IngestionStatus
 from src.application.dtos.youtube_auth import (
+    AudioDownloadPreset,
     YouTubeAuthStatus,
     YouTubeDownloadTestResult,
 )
@@ -31,6 +35,7 @@ from src.domain.models.video import VideoMetadata, VideoStatus
 from src.infrastructure.youtube.downloader import DownloadError, VideoNotFoundError
 
 router = APIRouter()
+_DOWNLOAD_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9]+")
 
 
 class AdminArtifactResponse(BaseModel):
@@ -162,6 +167,20 @@ class UpdateYouTubeCookieRequest(BaseModel):
         default=None,
         max_length=120,
         description="Optional operator label for the pasted cookie",
+    )
+
+
+class BrowserAudioDownloadRequest(BaseModel):
+    """Request model for browser-delivered audio-only downloads."""
+
+    youtube_url: str = Field(
+        min_length=1,
+        description="YouTube URL to fetch as audio-only media",
+        examples=["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+    )
+    preset: AudioDownloadPreset = Field(
+        default=AudioDownloadPreset.MP3_192,
+        description="Audio download preset",
     )
 
 
@@ -437,6 +456,62 @@ async def run_youtube_download_test(
         ) from exc
 
 
+@router.post(
+    "/admin/youtube-auth/download-audio",
+    response_class=FileResponse,
+    summary="Download YouTube audio in the browser",
+    description=(
+        "Fetch audio-only media with the current managed cookie state, return it "
+        "as a browser download, and delete the temporary artifact after the "
+        "response completes."
+    ),
+)
+async def download_youtube_audio(
+    request: BrowserAudioDownloadRequest,
+    service: YouTubeAuthServiceDep,
+) -> FileResponse:
+    """Prepare an ephemeral audio file and return it as an attachment."""
+    try:
+        prepared_download = await service.prepare_audio_download(
+            youtube_url=request.youtube_url,
+            preset=request.preset,
+        )
+    except ValueError as exc:
+        raise APIError(
+            code="INVALID_YOUTUBE_URL",
+            message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        ) from exc
+    except VideoNotFoundError as exc:
+        raise APIError(
+            code="YOUTUBE_VIDEO_NOT_FOUND",
+            message=str(exc),
+            status_code=status.HTTP_404_NOT_FOUND,
+        ) from exc
+    except DownloadError as exc:
+        raise APIError(
+            code=exc.code,
+            message=str(exc),
+            status_code=exc.status_code,
+            details=exc.details,
+        ) from exc
+
+    return FileResponse(
+        path=prepared_download.file_path,
+        media_type=_audio_media_type(prepared_download.audio_format),
+        filename=_build_audio_download_filename(
+            prepared_download.title,
+            prepared_download.youtube_id,
+            prepared_download.audio_format,
+        ),
+        headers={"X-YouTube-Auth-Mode": prepared_download.auth_mode.value},
+        background=BackgroundTask(
+            _cleanup_prepared_audio_download,
+            str(prepared_download.cleanup_dir),
+        ),
+    )
+
+
 def _to_ingestion_status(video_status: VideoStatus) -> IngestionStatus:
     """Map internal processing states to user-facing ingestion statuses."""
     if video_status == VideoStatus.READY:
@@ -663,6 +738,33 @@ async def _chunk_artifacts(
         return artifacts
 
     return artifacts
+
+
+def _build_audio_download_filename(
+    title: str,
+    youtube_id: str,
+    audio_format: str,
+) -> str:
+    """Create a predictable ASCII filename for browser downloads."""
+    slug = _DOWNLOAD_FILENAME_PATTERN.sub("-", title).strip("-").lower()
+    stem = slug[:80] or youtube_id
+    return f"{stem}-{youtube_id}.{audio_format}"
+
+
+def _audio_media_type(audio_format: str) -> str:
+    """Map response media types for the supported audio presets."""
+    if audio_format == "m4a":
+        return "audio/mp4"
+    if audio_format == "opus":
+        return "audio/ogg"
+    return "audio/mpeg"
+
+
+def _cleanup_prepared_audio_download(cleanup_dir: str) -> None:
+    """Delete the temporary directory used for a browser audio download."""
+    from shutil import rmtree
+
+    rmtree(cleanup_dir, ignore_errors=True)
 
 
 async def _safe_presigned_url(

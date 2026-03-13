@@ -1,6 +1,8 @@
 """Unit tests for API routes."""
 
 from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,6 +23,8 @@ from src.application.dtos.query import (
     TimestampRangeDTO,
 )
 from src.application.dtos.youtube_auth import (
+    AudioDownloadPreset,
+    PreparedYouTubeAudioDownload,
     YouTubeAuthMode,
     YouTubeAuthStatus,
     YouTubeDownloadTestResult,
@@ -721,6 +725,71 @@ class TestAdminRoutes:
         response = client.post(
             "/v1/admin/youtube-auth/download-test",
             json={"youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        payload = response.json()
+        assert payload["error"]["code"] == "YOUTUBE_AUTH_INVALID"
+        assert payload["error"]["details"]["kind"] == "auth_invalid"
+
+    def test_download_youtube_audio(self, client, mock_youtube_auth_service):
+        """Test browser-delivered audio-only downloads."""
+        with TemporaryDirectory() as temp_dir:
+            cleanup_dir = Path(temp_dir)
+            artifact_path = cleanup_dir / "track.mp3"
+            artifact_path.write_bytes(b"fake audio bytes")
+
+            mock_youtube_auth_service.prepare_audio_download.return_value = (
+                PreparedYouTubeAudioDownload(
+                    youtube_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    youtube_id="dQw4w9WgXcQ",
+                    title="Never Gonna Give You Up",
+                    channel_name="Rick Astley",
+                    duration_seconds=213,
+                    auth_mode=YouTubeAuthMode.MANAGED_COOKIE,
+                    audio_format="mp3",
+                    audio_quality="192",
+                    file_path=artifact_path,
+                    cleanup_dir=cleanup_dir,
+                )
+            )
+
+            response = client.post(
+                "/v1/admin/youtube-auth/download-audio",
+                json={
+                    "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    "preset": AudioDownloadPreset.MP3_192.value,
+                },
+            )
+
+            assert response.status_code == status.HTTP_200_OK
+            assert response.content == b"fake audio bytes"
+            assert response.headers["content-type"] == "audio/mpeg"
+            assert response.headers["x-youtube-auth-mode"] == "managed_cookie"
+            assert "attachment;" in response.headers["content-disposition"]
+            assert "dQw4w9WgXcQ.mp3" in response.headers["content-disposition"]
+            assert not cleanup_dir.exists()
+
+    def test_download_youtube_audio_with_invalid_cookie(
+        self,
+        client,
+        mock_youtube_auth_service,
+    ):
+        """Test that audio download preserves actionable yt-dlp auth failures."""
+        mock_youtube_auth_service.prepare_audio_download.side_effect = DownloadError(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "YouTube rejected the managed cookies.txt as expired or rotated.",
+            code="YOUTUBE_AUTH_INVALID",
+            status_code=409,
+            kind="auth_invalid",
+        )
+
+        response = client.post(
+            "/v1/admin/youtube-auth/download-audio",
+            json={
+                "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "preset": AudioDownloadPreset.MP3_192.value,
+            },
         )
 
         assert response.status_code == status.HTTP_409_CONFLICT

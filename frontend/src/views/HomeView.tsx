@@ -23,11 +23,15 @@ import {
   type YouTubeDownloadTestResult,
 } from "../api";
 import {
+  formatBytes,
   formatCompactNumber,
   formatDateTime,
   formatDuration,
+  formatElapsed,
   formatStatusLabel,
+  formatYouTubeAuthMode,
   statusTone,
+  youtubeAuthTone,
 } from "../format";
 
 const initialFormState: IngestRequest = {
@@ -759,37 +763,4 @@ function ToggleField({
       <span>{label}</span>
     </label>
   );
-}
-
-function formatYouTubeAuthMode(mode: YouTubeAuthStatus["mode"]): string {
-  return mode.replace(/_/g, " ");
-}
-
-function youtubeAuthTone(mode: YouTubeAuthStatus["mode"]): string {
-  switch (mode) {
-    case "managed_cookie":
-      return "success";
-    default:
-      return "neutral";
-  }
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatElapsed(value: number): string {
-  if (value < 1000) {
-    return `${value} ms`;
-  }
-
-  return `${(value / 1000).toFixed(1)} s`;
 }
