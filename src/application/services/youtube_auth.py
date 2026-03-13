@@ -415,9 +415,8 @@ class YouTubeAuthService:
                 error_message=None,
             )
         except Exception as exc:
-            if (
-                blob_path is not None
-                and await blob_storage.exists(self._downloads_bucket, blob_path)
+            if blob_path is not None and await blob_storage.exists(
+                self._downloads_bucket, blob_path
             ):
                 await blob_storage.delete(self._downloads_bucket, blob_path)
 
@@ -432,9 +431,7 @@ class YouTubeAuthService:
                     else None
                 ),
                 title=(
-                    prepared_download.title
-                    if prepared_download is not None
-                    else None
+                    prepared_download.title if prepared_download is not None else None
                 ),
                 channel_name=(
                     prepared_download.channel_name
