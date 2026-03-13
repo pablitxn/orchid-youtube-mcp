@@ -1,4 +1,4 @@
-import type { IngestionStatus, YouTubeAuthMode } from "./api";
+import type { AudioDownloadState, IngestionStatus, YouTubeAuthMode } from "./api";
 
 export function formatDateTime(value: string | null): string {
   if (value === null) {
@@ -11,7 +11,11 @@ export function formatDateTime(value: string | null): string {
   }).format(new Date(value));
 }
 
-export function formatDuration(seconds: number): string {
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null) {
+    return "n/a";
+  }
+
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const remaining = Math.floor(seconds % 60);
@@ -60,7 +64,7 @@ export function formatYouTubeAuthMode(mode: YouTubeAuthMode): string {
   return mode.replace(/_/g, " ");
 }
 
-export function youtubeAuthTone(mode: YouTubeAuthMode): string {
+export function youtubeAuthTone(mode: YouTubeAuthMode | null | undefined): string {
   switch (mode) {
     case "managed_cookie":
       return "success";
@@ -69,7 +73,29 @@ export function youtubeAuthTone(mode: YouTubeAuthMode): string {
   }
 }
 
-export function formatBytes(value: number): string {
+export function formatAudioDownloadState(state: AudioDownloadState): string {
+  return state.replace(/_/g, " ");
+}
+
+export function audioDownloadTone(state: AudioDownloadState): string {
+  switch (state) {
+    case "completed":
+      return "success";
+    case "failed":
+      return "danger";
+    case "downloading":
+    case "uploading":
+      return "warning";
+    default:
+      return "neutral";
+  }
+}
+
+export function formatBytes(value: number | null | undefined): string {
+  if (value == null) {
+    return "n/a";
+  }
+
   if (value < 1024) {
     return `${value} B`;
   }

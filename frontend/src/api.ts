@@ -197,6 +197,12 @@ export interface AgentChatResponse {
 }
 
 export type YouTubeAuthMode = "managed_cookie" | "none";
+export type AudioDownloadState =
+  | "queued"
+  | "downloading"
+  | "uploading"
+  | "completed"
+  | "failed";
 export type AudioDownloadPreset =
   | "mp3_128"
   | "mp3_192"
@@ -237,19 +243,25 @@ export interface SavedAudioDownload {
   id: string;
   kind: string;
   youtube_url: string;
-  youtube_id: string;
-  title: string;
-  channel_name: string;
-  duration_seconds: number;
+  youtube_id: string | null;
+  title: string | null;
+  channel_name: string | null;
+  duration_seconds: number | null;
   auth_mode: YouTubeAuthMode;
   preset: AudioDownloadPreset;
   audio_format: string;
   audio_quality: string;
-  filename: string;
-  file_size_bytes: number;
-  bucket: string;
-  blob_path: string;
+  filename: string | null;
+  file_size_bytes: number | null;
+  bucket: string | null;
+  blob_path: string | null;
+  state: AudioDownloadState;
+  state_message: string | null;
+  error_code: string | null;
+  error_message: string | null;
   created_at: string;
+  updated_at: string | null;
+  completed_at: string | null;
 }
 
 export interface SavedAudioDownloadListResponse {

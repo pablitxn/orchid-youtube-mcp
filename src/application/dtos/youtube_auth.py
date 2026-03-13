@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class YouTubeAuthMode(str, Enum):
@@ -22,6 +22,16 @@ class AudioDownloadPreset(str, Enum):
     MP3_192 = "mp3_192"
     M4A_128 = "m4a_128"
     OPUS_160 = "opus_160"
+
+
+class AudioDownloadState(str, Enum):
+    """Lifecycle states for persisted audio download jobs."""
+
+    QUEUED = "queued"
+    DOWNLOADING = "downloading"
+    UPLOADING = "uploading"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class YouTubeAuthStatus(BaseModel):
@@ -91,26 +101,82 @@ class PreparedYouTubeAudioDownload:
 
 
 class SavedYouTubeAudioDownload(BaseModel):
-    """Persisted audio-only download stored in blob storage."""
+    """Persisted audio-only download or in-flight audio download job."""
 
     id: str = Field(description="Persistent download identifier")
     kind: str = Field(default="saved_audio_download")
     youtube_url: str = Field(description="Original YouTube URL")
-    youtube_id: str = Field(description="Resolved YouTube video ID")
-    title: str = Field(description="Resolved video title")
-    channel_name: str = Field(description="Resolved channel name")
-    duration_seconds: int = Field(ge=0, description="Video duration in seconds")
+    youtube_id: str | None = Field(
+        default=None,
+        description="Resolved YouTube video ID when available",
+    )
+    title: str | None = Field(default=None, description="Resolved video title")
+    channel_name: str | None = Field(
+        default=None,
+        description="Resolved channel name when available",
+    )
+    duration_seconds: int | None = Field(
+        default=None,
+        ge=0,
+        description="Video duration in seconds when metadata has been resolved",
+    )
     auth_mode: YouTubeAuthMode = Field(
         description="Authentication mode active when the download was created"
     )
     preset: AudioDownloadPreset = Field(description="Saved preset identifier")
     audio_format: str = Field(description="Stored audio file format")
     audio_quality: str = Field(description="Stored audio quality string")
-    filename: str = Field(description="Suggested browser filename")
-    file_size_bytes: int = Field(ge=0, description="Stored blob size in bytes")
-    bucket: str = Field(description="Blob bucket used for the stored file")
-    blob_path: str = Field(description="Blob path for the stored file")
+    filename: str | None = Field(
+        default=None,
+        description="Suggested browser filename when the artifact is ready",
+    )
+    file_size_bytes: int | None = Field(
+        default=None,
+        ge=0,
+        description="Stored blob size in bytes when the artifact is ready",
+    )
+    bucket: str | None = Field(
+        default=None,
+        description="Blob bucket used for the stored file",
+    )
+    blob_path: str | None = Field(
+        default=None,
+        description="Blob path for the stored file when upload completed",
+    )
+    state: AudioDownloadState = Field(
+        default=AudioDownloadState.COMPLETED,
+        description="Current lifecycle state of the audio download",
+    )
+    state_message: str | None = Field(
+        default=None,
+        description="Human-friendly description of the current lifecycle state",
+    )
+    error_code: str | None = Field(
+        default=None,
+        description="Structured error code when the download failed",
+    )
+    error_message: str | None = Field(
+        default=None,
+        description="Operator-facing failure reason when the download failed",
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime | None = Field(
+        default=None,
+        description="Most recent lifecycle state update",
+    )
+    completed_at: datetime | None = Field(
+        default=None,
+        description="When the job reached a terminal state",
+    )
+
+    @model_validator(mode="after")
+    def _apply_legacy_defaults(self) -> "SavedYouTubeAudioDownload":
+        """Backfill fields for older persisted rows created before state support."""
+        if self.updated_at is None:
+            self.updated_at = self.created_at
+        if self.state == AudioDownloadState.COMPLETED and self.completed_at is None:
+            self.completed_at = self.created_at
+        return self
 
 
 class SavedYouTubeAudioDownloadList(BaseModel):

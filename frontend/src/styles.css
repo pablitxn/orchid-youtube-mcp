@@ -691,7 +691,7 @@ button {
 
 .data-table {
   width: 100%;
-  min-width: 860px;
+  min-width: 980px;
   border-collapse: collapse;
 }
 
@@ -716,7 +716,8 @@ button {
 }
 
 .table-primary,
-.table-secondary {
+.table-secondary,
+.table-tertiary {
   overflow-wrap: anywhere;
 }
 
@@ -728,6 +729,12 @@ button {
   margin-top: 4px;
   color: var(--muted);
   font-size: 0.92rem;
+}
+
+.table-tertiary {
+  margin-top: 8px;
+  color: #8f3021;
+  font-size: 0.88rem;
 }
 
 .row-actions {

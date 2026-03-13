@@ -189,6 +189,7 @@ async def init_services(
     )
     try:
         await youtube_auth_service.bootstrap_runtime_cookie_file()
+        await youtube_auth_service.recover_interrupted_audio_downloads()
     except Exception:
         auth_logger.warning(
             "Managed YouTube cookie bootstrap failed; "
