@@ -3875,7 +3875,7 @@ requires-dist = [
     { name = "types-aiofiles", marker = "extra == 'dev'", specifier = ">=24.1.0" },
     { name = "types-pillow", marker = "extra == 'dev'", specifier = ">=10.2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
-    { name = "yt-dlp", extras = ["default", "curl-cffi"], specifier = ">=2026.1.31" },
+    { name = "yt-dlp", extras = ["default", "curl-cffi"], specifier = "==2026.3.17" },
 ]
 provides-extras = ["dev", "docs"]
 
@@ -3892,11 +3892,11 @@ dev = [
 
 [[package]]
 name = "yt-dlp"
-version = "2026.3.3.162408.dev0"
+version = "2026.3.17"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e1/21/c6df66c3cca6cb51e0bea34e20213ff06f5bea5b3fd95ccb092f4e662207/yt_dlp-2026.3.3.162408.dev0.tar.gz", hash = "sha256:ca9bc6343a0807ebd0b79aa2df09f73f983f7d2c5e859c461322b000fee5ab3a", size = 3119178, upload-time = "2026-03-03T16:28:35.188Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8b/34/7c6b4e3f89cb6416d2cd7ab6dab141a1df97ab0fb22d15816db2c92148c9/yt_dlp-2026.3.17.tar.gz", hash = "sha256:ba7aa31d533f1ffccfe70e421596d7ca8ff0bf1398dc6bb658b7d9dec057d2c9", size = 3119221, upload-time = "2026-03-17T23:43:00.244Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/b6/75da336e8228baf15cd7d12fdca52c216d2bb579864c7a706873d1487f35/yt_dlp-2026.3.3.162408.dev0-py3-none-any.whl", hash = "sha256:5c6a09789e7ce05ec7fdd34b1d67e55853ab10e1ba79766fb91d5da7e67f6244", size = 3315877, upload-time = "2026-03-03T16:28:32.916Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/13/5093bcb954878e50f7217fd2ab94282b53934022e4e4a03265582da83bf5/yt_dlp-2026.3.17-py3-none-any.whl", hash = "sha256:32992db94303a8a5d211a183f2174834fe7f8c29d83ed2e7a324eae97a8f26d8", size = 3315134, upload-time = "2026-03-17T23:42:57.863Z" },
 ]
 
 [package.optional-dependencies]
@@ -3917,11 +3917,11 @@ default = [
 
 [[package]]
 name = "yt-dlp-ejs"
-version = "0.5.0"
+version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6b/0d/b9e4ab1b47cdeba0842df634b74b3c0144307640ad5b632a5e189c4ab7ce/yt_dlp_ejs-0.5.0.tar.gz", hash = "sha256:8dfae59e418232f485253dcf8e197fefa232423c3af7824fe19e4517b173293b", size = 98925, upload-time = "2026-02-21T19:29:16.844Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/e6/cceb9530e8f4e5940f6f7822d90e9d94f1b85343329a16baaf47bbbb3de1/yt_dlp_ejs-0.8.0.tar.gz", hash = "sha256:d5fa1639f63b5c4af8d932495f60689d5370f1a095782c944f7f62a303eb104e", size = 96571, upload-time = "2026-03-17T22:49:19.299Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/5b/1283356b70d4893a8a050cee15092e1b08ea15310b94365f88067146721b/yt_dlp_ejs-0.5.0-py3-none-any.whl", hash = "sha256:674fc0efea741d3100cdf3f0f9e123150715ee41edf47ea7a62fbdeda204bdec", size = 54032, upload-time = "2026-02-21T19:29:15.408Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/bd/520769863744b669440a924271a6159ddd82ad5ae26b4ac4d4b69e9f8d44/yt_dlp_ejs-0.8.0-py3-none-any.whl", hash = "sha256:79300e5fca7f937a1eeede11f0456862c1b41107ce1d726871e0207424f4bdb4", size = 53443, upload-time = "2026-03-17T22:49:17.736Z" },
 ]
 
 [[package]]
