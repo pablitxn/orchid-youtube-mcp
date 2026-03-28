@@ -14,7 +14,7 @@ dependencies = [
     "qdrant-client>=1.12.0",
     "motor>=3.6.0",  # async MongoDB driver
     # Infrastructure - YouTube
-    "yt-dlp[default,curl-cffi]>=2026.1.31",
+    "yt-dlp[default,curl-cffi]==2026.3.17",
     # Infrastructure - AI Services
     "openai>=1.55.0",
     "anthropic>=0.40.0",
