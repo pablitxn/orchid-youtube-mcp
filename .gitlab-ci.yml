@@ -1,0 +1,98 @@
+stages:
+  - validate
+  - build
+
+default:
+  interruptible: true
+
+variables:
+  REGISTRY_PUSH_HOST: gitlab-registry.gitlab.svc.cluster.local:32443
+  DOCKERFILE_PATH: Dockerfile
+  GIT_DEPTH: "20"
+  KUBERNETES_CPU_REQUEST: "100m"
+  KUBERNETES_CPU_LIMIT: "500m"
+  KUBERNETES_MEMORY_REQUEST: "256Mi"
+  KUBERNETES_MEMORY_LIMIT: "1Gi"
+  KUBERNETES_HELPER_CPU_REQUEST: "50m"
+  KUBERNETES_HELPER_CPU_LIMIT: "100m"
+  KUBERNETES_HELPER_MEMORY_REQUEST: "64Mi"
+  KUBERNETES_HELPER_MEMORY_LIMIT: "128Mi"
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+.app-changes: &app-changes
+  - .dockerignore
+  - .gitlab-ci.yml
+  - Dockerfile
+  - pyproject.toml
+  - uv.lock
+  - config/**/*
+  - frontend/**/*
+  - src/**/*
+  - tests/**/*
+
+validate-app:
+  stage: validate
+  image: python:3.11-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: *app-changes
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+    - pip install --no-cache-dir uv
+  script:
+    - uv sync --frozen --dev
+    - uv run ruff check src tests
+    - uv run mypy src
+    - uv run pytest -m "not integration and not e2e" --cov-fail-under=0
+
+build-image:
+  stage: build
+  resource_group: orchid-youtube-mcp-image-build
+  image:
+    name: gcr.io/kaniko-project/executor:v1.23.2-debug
+    entrypoint: [""]
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"
+      changes: *app-changes
+  script:
+    - mkdir -p /kaniko/.docker
+    - |
+      gitlab_auth="$(printf '%s:%s' "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')"
+      printf '{"auths":{"%s":{"auth":"%s"},"%s":{"auth":"%s"}}}\n' \
+        "${CI_REGISTRY}" "${gitlab_auth}" "${REGISTRY_PUSH_HOST}" "${gitlab_auth}" \
+        > /kaniko/.docker/config.json
+    - |
+      destination_base="${REGISTRY_PUSH_HOST}/${CI_PROJECT_PATH}"
+      cache_repo="${destination_base}/cache"
+      destinations="--destination=${destination_base}:sha-${CI_COMMIT_SHORT_SHA}"
+
+      if [ -n "${CI_COMMIT_BRANCH}" ]; then
+        destinations="${destinations} --destination=${destination_base}:${CI_COMMIT_REF_SLUG}"
+      fi
+
+      if [ "${CI_COMMIT_BRANCH}" = "${CI_DEFAULT_BRANCH}" ]; then
+        destinations="${destinations} --destination=${destination_base}:prod"
+      fi
+
+      if [ -n "${CI_COMMIT_TAG}" ]; then
+        destinations="${destinations} --destination=${destination_base}:${CI_COMMIT_TAG}"
+      fi
+
+      /kaniko/executor \
+        --context "${CI_PROJECT_DIR}" \
+        --dockerfile "${CI_PROJECT_DIR}/${DOCKERFILE_PATH}" \
+        --cache=true \
+        --cache-repo "${cache_repo}" \
+        --cache-copy-layers \
+        --cache-run-layers \
+        --cache-ttl=168h \
+        --cleanup \
+        --snapshot-mode=redo \
+        --skip-tls-verify-registry="${REGISTRY_PUSH_HOST}" \
+        ${destinations}
