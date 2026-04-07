@@ -71,9 +71,23 @@ def mock_query_service():
 
 
 @pytest.fixture
-def client(mock_settings, mock_factory, mock_ingestion_service, mock_query_service):
+def mock_audio_download_service():
+    """Create mock audio download service."""
+    service = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def client(
+    mock_settings,
+    mock_factory,
+    mock_ingestion_service,
+    mock_query_service,
+    mock_audio_download_service,
+):
     """Create test client with mocked dependencies."""
     from src.adapters.dependencies import (
+        get_audio_download_service,
         get_infrastructure_factory,
         get_ingestion_service,
         get_query_service,
@@ -91,6 +105,9 @@ def client(mock_settings, mock_factory, mock_ingestion_service, mock_query_servi
         app.dependency_overrides[get_infrastructure_factory] = lambda: mock_factory
         app.dependency_overrides[get_ingestion_service] = lambda: mock_ingestion_service
         app.dependency_overrides[get_query_service] = lambda: mock_query_service
+        app.dependency_overrides[get_audio_download_service] = (
+            lambda: mock_audio_download_service
+        )
         yield TestClient(app, raise_server_exceptions=False)
 
 
@@ -368,5 +385,63 @@ class TestVideoManagementRoutes:
             "/v1/videos/nonexistent",
             headers={"X-Confirm-Delete": "true"},
         )
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestAudioRoutes:
+    """Tests for audio download endpoints."""
+
+    def test_queue_audio_download_batch(self, client, mock_audio_download_service):
+        """Test queuing an audio download batch."""
+        mock_audio_download_service.submit_batch.return_value = {
+            "job_id": "batch-123",
+            "status": "queued",
+            "total_items": 1,
+            "queued_items": 1,
+            "active_items": 0,
+            "completed_items": 0,
+            "failed_items": 0,
+            "output_dir": "/tmp/audio/batch-123",
+            "audio_format": "mp3",
+            "audio_quality": "192",
+            "max_concurrent_downloads": 3,
+            "created_at": datetime.now(UTC).isoformat(),
+            "finished_at": None,
+            "items": [
+                {
+                    "index": 0,
+                    "youtube_url": "https://youtube.com/watch?v=test123",
+                    "status": "queued",
+                    "youtube_id": None,
+                    "title": None,
+                    "output_path": None,
+                    "error_message": None,
+                    "started_at": None,
+                    "completed_at": None,
+                }
+            ],
+        }
+
+        response = client.post(
+            "/v1/audio/downloads/batch",
+            json={
+                "youtube_urls": ["https://youtube.com/watch?v=test123"],
+                "max_concurrent_downloads": 3,
+            },
+        )
+
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        assert response.json()["job_id"] == "batch-123"
+
+    def test_get_audio_download_batch_not_found(
+        self,
+        client,
+        mock_audio_download_service,
+    ):
+        """Test status for a missing audio download batch."""
+        mock_audio_download_service.get_batch.return_value = None
+
+        response = client.get("/v1/audio/downloads/batch/missing")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND

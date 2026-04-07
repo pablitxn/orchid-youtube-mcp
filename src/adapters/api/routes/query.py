@@ -3,8 +3,8 @@
 from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
+from src.adapters.api.errors import APIError
 from src.adapters.dependencies import QueryServiceDep
-from orchid_commons import APIError
 from src.application.dtos.query import (
     CitationDTO,
     QueryMetadata,

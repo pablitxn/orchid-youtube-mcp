@@ -2,11 +2,15 @@
 
 from typing import Any
 
+from src.application.dtos.audio_download import AudioDownloadBatchRequest
 from src.application.dtos.ingestion import IngestVideoRequest
 from src.application.dtos.query import (
     GetSourcesRequest,
     QueryModality,
     QueryVideoRequest,
+)
+from src.application.services.audio_download import (
+    get_audio_download_service_instance,
 )
 from src.application.services.ingestion import VideoIngestionService
 from src.application.services.query import VideoQueryService
@@ -354,3 +358,39 @@ async def delete_video_tool(
         "video_id": video_id,
         "message": "Video and all associated data deleted successfully",
     }
+
+
+async def download_audio_batch_tool(
+    factory: InfrastructureFactory,
+    settings: Settings,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Queue an audio-only batch download job."""
+    del settings
+    service = get_audio_download_service_instance(factory.get_youtube_downloader())
+    request = AudioDownloadBatchRequest(
+        youtube_urls=arguments["youtube_urls"],
+        output_dir=arguments.get("output_dir"),
+        audio_format=arguments.get("audio_format", "mp3"),
+        audio_quality=arguments.get("audio_quality", "192"),
+        max_concurrent_downloads=arguments.get("max_concurrent_downloads", 3),
+    )
+    result = await service.submit_batch(request)
+    return result.model_dump(mode="json")
+
+
+async def get_audio_download_batch_status_tool(
+    factory: InfrastructureFactory,
+    settings: Settings,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Get the current snapshot for an audio batch job."""
+    del settings
+    service = get_audio_download_service_instance(factory.get_youtube_downloader())
+    result = await service.get_batch(arguments["job_id"])
+    if result is None:
+        return {
+            "error": f"Audio batch job '{arguments['job_id']}' was not found",
+            "job_id": arguments["job_id"],
+        }
+    return result.model_dump(mode="json")

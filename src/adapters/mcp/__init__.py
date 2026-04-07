@@ -3,6 +3,8 @@
 from src.adapters.mcp.server import create_mcp_server, run_mcp_server
 from src.adapters.mcp.tools import (
     delete_video_tool,
+    download_audio_batch_tool,
+    get_audio_download_batch_status_tool,
     get_ingestion_status_tool,
     get_sources_tool,
     ingest_video_tool,
@@ -14,6 +16,8 @@ __all__ = [
     "create_mcp_server",
     "run_mcp_server",
     "delete_video_tool",
+    "download_audio_batch_tool",
+    "get_audio_download_batch_status_tool",
     "get_ingestion_status_tool",
     "get_sources_tool",
     "ingest_video_tool",

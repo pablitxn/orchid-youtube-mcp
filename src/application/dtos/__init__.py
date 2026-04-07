@@ -1,5 +1,12 @@
 """Data Transfer Objects for application layer."""
 
+from src.application.dtos.audio_download import (
+    AudioDownloadBatchRequest,
+    AudioDownloadBatchResponse,
+    AudioDownloadBatchStatus,
+    AudioDownloadItemResponse,
+    AudioDownloadItemStatus,
+)
 from src.application.dtos.ingestion import (
     IngestionProgress,
     IngestionStatus,
@@ -26,6 +33,12 @@ from src.application.dtos.query import (
 )
 
 __all__ = [
+    # Audio download DTOs
+    "AudioDownloadBatchRequest",
+    "AudioDownloadBatchResponse",
+    "AudioDownloadBatchStatus",
+    "AudioDownloadItemResponse",
+    "AudioDownloadItemStatus",
     # Ingestion DTOs
     "IngestVideoRequest",
     "IngestVideoResponse",

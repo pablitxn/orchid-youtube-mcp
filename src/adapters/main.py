@@ -8,9 +8,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from orchid_commons import create_fastapi_observability_middleware
 
+from src.adapters.api.routes import audio, health, ingestion, query, sources, videos
 from src.adapters.dependencies import get_settings, init_services, shutdown_services
 from src.adapters.middleware.error_handler import build_error_middleware
-from src.adapters.api.routes import health, ingestion, query, sources, videos
 
 
 @asynccontextmanager
@@ -85,6 +85,7 @@ def _register_routes(app: FastAPI, settings: Any) -> None:
 
     # API routes with version prefix
     app.include_router(ingestion.router, prefix=prefix, tags=["Ingestion"])
+    app.include_router(audio.router, prefix=prefix, tags=["Audio"])
     app.include_router(query.router, prefix=prefix, tags=["Query"])
     app.include_router(sources.router, prefix=prefix, tags=["Sources"])
     app.include_router(videos.router, prefix=prefix, tags=["Videos"])

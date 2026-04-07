@@ -180,6 +180,7 @@ class InfrastructureFactory:
                 Path(yt_settings.cookies_file) if yt_settings.cookies_file else None
             )
             self._instances["youtube_downloader"] = YtDlpDownloader(
+                js_runtime=yt_settings.js_runtime,
                 cookies_file=cookies_file,
                 cookies_from_browser=yt_settings.cookies_from_browser,
                 proxy=yt_settings.proxy,

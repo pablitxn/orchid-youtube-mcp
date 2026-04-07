@@ -1,12 +1,14 @@
 """Unit tests for MCP tools."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.adapters.mcp.tools import (
     delete_video_tool,
+    download_audio_batch_tool,
+    get_audio_download_batch_status_tool,
     get_ingestion_status_tool,
     get_sources_tool,
     ingest_video_tool,
@@ -255,3 +257,55 @@ class TestDeleteVideoTool:
 
         assert result["success"] is True
         assert result["video_id"] == "video-1"
+
+
+class TestAudioBatchTools:
+    """Tests for audio batch download MCP tools."""
+
+    async def test_download_audio_batch_tool(self, mock_factory, mock_settings):
+        """Test queuing a new audio batch job."""
+        mock_service = AsyncMock()
+        mock_batch = MagicMock()
+        mock_batch.model_dump.return_value = {
+            "job_id": "batch-123",
+            "status": "queued",
+        }
+        mock_service.submit_batch.return_value = mock_batch
+
+        with patch(
+            "src.adapters.mcp.tools.get_audio_download_service_instance",
+            return_value=mock_service,
+        ):
+            result = await download_audio_batch_tool(
+                mock_factory,
+                mock_settings,
+                {
+                    "youtube_urls": ["https://youtube.com/watch?v=test123"],
+                    "max_concurrent_downloads": 3,
+                },
+            )
+
+        assert result["job_id"] == "batch-123"
+        mock_service.submit_batch.assert_awaited_once()
+
+    async def test_get_audio_download_batch_status_not_found(
+        self,
+        mock_factory,
+        mock_settings,
+    ):
+        """Test missing batch status response."""
+        mock_service = AsyncMock()
+        mock_service.get_batch.return_value = None
+
+        with patch(
+            "src.adapters.mcp.tools.get_audio_download_service_instance",
+            return_value=mock_service,
+        ):
+            result = await get_audio_download_batch_status_tool(
+                mock_factory,
+                mock_settings,
+                {"job_id": "missing"},
+            )
+
+        assert "error" in result
+        assert result["job_id"] == "missing"

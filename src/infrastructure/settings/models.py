@@ -306,6 +306,12 @@ class ProcessingSettings(BaseModel):
 class YouTubeSettings(BaseModel):
     """YouTube downloader settings."""
 
+    js_runtime: Literal["node", "deno", "bun", "quickjs"] | None = Field(
+        default="node",
+        description=(
+            "JavaScript runtime used by yt-dlp for YouTube challenge solving"
+        ),
+    )
     cookies_file: str | None = Field(
         default=None,
         description="Path to cookies.txt file for authenticated downloads",

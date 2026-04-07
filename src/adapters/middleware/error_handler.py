@@ -1,7 +1,6 @@
 """Domain-specific error handlers for the YouTube MCP skill."""
 
-from orchid_commons import APIError, ErrorResponse, create_fastapi_error_middleware
-
+from src.adapters.api.errors import ErrorResponse, create_fastapi_error_middleware
 from src.application.services.ingestion import IngestionError
 from src.domain.exceptions import (
     ChunkNotFoundException,

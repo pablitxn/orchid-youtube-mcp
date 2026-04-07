@@ -15,6 +15,8 @@ from mcp.types import (
 from src.adapters.dependencies import get_settings, init_services, shutdown_services
 from src.adapters.mcp.tools import (
     delete_video_tool,
+    download_audio_batch_tool,
+    get_audio_download_batch_status_tool,
     get_ingestion_status_tool,
     get_sources_tool,
     ingest_video_tool,
@@ -73,6 +75,67 @@ def create_mcp_server() -> Server:
                         },
                     },
                     "required": ["youtube_url"],
+                },
+            ),
+            Tool(
+                name="download_audio_batch",
+                description=(
+                    "Queue a batch of YouTube URLs for audio-only download. "
+                    "Downloads are processed in the background with a hard "
+                    "maximum of 3 simultaneous items."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "youtube_urls": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "description": "List of YouTube URLs to download as audio",
+                        },
+                        "output_dir": {
+                            "type": "string",
+                            "description": (
+                                "Optional root directory. The server creates a "
+                                "per-job subdirectory inside it."
+                            ),
+                        },
+                        "audio_format": {
+                            "type": "string",
+                            "default": "mp3",
+                            "description": "Target audio format",
+                        },
+                        "audio_quality": {
+                            "type": "string",
+                            "default": "192",
+                            "description": "Preferred bitrate in kbps",
+                        },
+                        "max_concurrent_downloads": {
+                            "type": "integer",
+                            "default": 3,
+                            "minimum": 1,
+                            "maximum": 3,
+                            "description": "Maximum simultaneous downloads",
+                        },
+                    },
+                    "required": ["youtube_urls"],
+                },
+            ),
+            Tool(
+                name="get_audio_download_batch_status",
+                description="Get the status of a queued audio batch download job.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "job_id": {
+                            "type": "string",
+                            "description": (
+                                "Batch job ID returned by "
+                                "download_audio_batch"
+                            ),
+                        },
+                    },
+                    "required": ["job_id"],
                 },
             ),
             Tool(
@@ -224,6 +287,14 @@ def create_mcp_server() -> Server:
         try:
             if name == "ingest_video":
                 result = await ingest_video_tool(factory, settings, arguments)
+            elif name == "download_audio_batch":
+                result = await download_audio_batch_tool(factory, settings, arguments)
+            elif name == "get_audio_download_batch_status":
+                result = await get_audio_download_batch_status_tool(
+                    factory,
+                    settings,
+                    arguments,
+                )
             elif name == "get_ingestion_status":
                 result = await get_ingestion_status_tool(factory, settings, arguments)
             elif name == "query_video":

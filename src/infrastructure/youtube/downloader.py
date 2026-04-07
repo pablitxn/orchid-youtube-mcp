@@ -50,6 +50,7 @@ class YtDlpDownloader(YouTubeDownloaderBase):
 
     def __init__(
         self,
+        js_runtime: str | None = "node",
         cookies_file: Path | None = None,
         cookies_from_browser: str | None = None,
         proxy: str | None = None,
@@ -58,12 +59,14 @@ class YtDlpDownloader(YouTubeDownloaderBase):
         """Initialize yt-dlp downloader.
 
         Args:
+            js_runtime: JavaScript runtime used by yt-dlp for challenge solving.
             cookies_file: Path to cookies file for authenticated downloads.
             cookies_from_browser: Browser name to extract cookies from
                 (e.g., "chrome", "firefox", "edge", "safari", "opera", "brave").
             proxy: Proxy URL.
             rate_limit: Rate limit (e.g., "50K", "1M").
         """
+        self._js_runtime = js_runtime
         self._cookies_file = cookies_file
         self._cookies_from_browser = cookies_from_browser
         self._proxy = proxy
@@ -76,6 +79,8 @@ class YtDlpDownloader(YouTubeDownloaderBase):
             "no_warnings": True,
             "extract_flat": False,
         }
+        if self._js_runtime:
+            opts["js_runtimes"] = {self._js_runtime: {}}
 
         # Cookie authentication (file takes precedence over browser)
         if self._cookies_file:

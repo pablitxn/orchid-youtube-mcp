@@ -5,6 +5,7 @@ import contextlib
 from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
+from src.adapters.api.errors import APIError
 from src.adapters.dependencies import IngestionServiceDep
 from src.application.dtos.ingestion import (
     IngestionStatus,
@@ -145,8 +146,6 @@ async def get_ingestion_status(
     result = await service.get_ingestion_status(video_id)
 
     if result is None:
-        from orchid_commons import APIError
-
         raise APIError(
             code="VIDEO_NOT_FOUND",
             message=f"Video with ID '{video_id}' was not found",

@@ -5,6 +5,11 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from src.application.services.audio_download import (
+    AudioDownloadBatchService,
+    get_audio_download_service_instance,
+    shutdown_audio_download_service_instance,
+)
 from src.application.services.ingestion import VideoIngestionService
 from src.application.services.query import VideoQueryService
 from src.infrastructure.factory import (
@@ -97,11 +102,22 @@ def get_query_service(
     )
 
 
+def get_audio_download_service(
+    factory: Annotated[InfrastructureFactory, Depends(get_infrastructure_factory)],
+) -> AudioDownloadBatchService:
+    """Get shared audio batch downloader service."""
+    return get_audio_download_service_instance(factory.get_youtube_downloader())
+
+
 # Type aliases for cleaner route signatures
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 FactoryDep = Annotated[InfrastructureFactory, Depends(get_infrastructure_factory)]
 IngestionServiceDep = Annotated[VideoIngestionService, Depends(get_ingestion_service)]
 QueryServiceDep = Annotated[VideoQueryService, Depends(get_query_service)]
+AudioDownloadServiceDep = Annotated[
+    AudioDownloadBatchService,
+    Depends(get_audio_download_service),
+]
 
 
 async def init_services(
@@ -141,6 +157,7 @@ async def shutdown_services() -> None:
     except ValueError:
         pass  # Factory not initialized
     finally:
+        await shutdown_audio_download_service_instance()
         shutdown_process_observability()
         reset_factory()
         await shutdown_runtime()

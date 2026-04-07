@@ -7,8 +7,8 @@ from typing import Annotated
 from fastapi import APIRouter, Header, Query, status
 from pydantic import BaseModel, Field
 
+from src.adapters.api.errors import APIError
 from src.adapters.dependencies import IngestionServiceDep
-from orchid_commons import APIError
 from src.application.dtos.ingestion import IngestionStatus
 from src.domain.models.video import VideoStatus
 

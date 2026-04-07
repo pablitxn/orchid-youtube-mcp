@@ -118,6 +118,7 @@ class TestDownloaderInit:
     def test_default_init(self):
         """Test default initialization."""
         downloader = YtDlpDownloader()
+        assert downloader._js_runtime == "node"
         assert downloader._cookies_file is None
         assert downloader._proxy is None
         assert downloader._rate_limit is None
@@ -127,10 +128,22 @@ class TestDownloaderInit:
         from pathlib import Path
 
         downloader = YtDlpDownloader(
+            js_runtime="bun",
             cookies_file=Path("/tmp/cookies.txt"),
             proxy="http://proxy:8080",
             rate_limit="1M",
         )
+        assert downloader._js_runtime == "bun"
         assert downloader._cookies_file == Path("/tmp/cookies.txt")
         assert downloader._proxy == "http://proxy:8080"
         assert downloader._rate_limit == "1M"
+
+    def test_base_opts_enable_js_runtime_by_default(self):
+        """Test that node is enabled for yt-dlp JS challenges."""
+        downloader = YtDlpDownloader()
+        assert downloader._get_base_opts()["js_runtimes"] == {"node": {}}
+
+    def test_base_opts_skip_js_runtime_when_disabled(self):
+        """Test explicit JS runtime disablement."""
+        downloader = YtDlpDownloader(js_runtime=None)
+        assert "js_runtimes" not in downloader._get_base_opts()
