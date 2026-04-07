@@ -49,7 +49,7 @@ const presetOptions: Array<{
 ];
 
 export function AudioDownloadView() {
-  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [youtubeUrlsText, setYoutubeUrlsText] = useState("");
   const [preset, setPreset] = useState<AudioDownloadPreset>("mp3_192");
   const [authStatus, setAuthStatus] = useState<YouTubeAuthStatus | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -59,6 +59,7 @@ export function AudioDownloadView() {
   const [downloadsError, setDownloadsError] = useState<string | null>(null);
   const [createState, setCreateState] = useState<"idle" | "queueing">("idle");
   const [createError, setCreateError] = useState<string | null>(null);
+  const [createSummary, setCreateSummary] = useState<string | null>(null);
   const [latestSavedId, setLatestSavedId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -112,6 +113,7 @@ export function AudioDownloadView() {
   const latestSaved =
     downloads.find((download) => download.id === latestSavedId) ?? null;
   const hasActiveDownloads = downloads.some(isActiveAudioDownload);
+  const requestedUrls = parseYouTubeUrls(youtubeUrlsText);
 
   async function refreshDownloads(options?: { background?: boolean }) {
     if (!options?.background) {
@@ -149,21 +151,44 @@ export function AudioDownloadView() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (requestedUrls.length === 0) {
+      setCreateError("Paste at least one supported YouTube URL.");
+      setCreateSummary(null);
+      return;
+    }
+
     setCreateState("queueing");
     setCreateError(null);
+    setCreateSummary(null);
 
     try {
-      const savedDownload = await createSavedAudioDownload({
-        youtube_url: youtubeUrl.trim(),
-        preset,
-      });
-      setLatestSavedId(savedDownload.id);
-      setDownloads((currentDownloads) => [
-        savedDownload,
-        ...currentDownloads.filter((download) => download.id !== savedDownload.id),
-      ]);
-      setYoutubeUrl("");
-      await refreshDownloads({ background: true });
+      const queueResult = await queueSavedAudioDownloads(requestedUrls, preset);
+
+      if (queueResult.queued.length > 0) {
+        const queuedIds = new Set(queueResult.queued.map((download) => download.id));
+        setLatestSavedId(queueResult.queued[0]?.id ?? null);
+        setDownloads((currentDownloads) => [
+          ...queueResult.queued,
+          ...currentDownloads.filter((download) => !queuedIds.has(download.id)),
+        ]);
+        await refreshDownloads({ background: true });
+      }
+
+      if (queueResult.failed.length === 0) {
+        setYoutubeUrlsText("");
+        setCreateSummary(
+          `Queued ${queueResult.queued.length} ${pluralizeAudio(queueResult.queued.length)}. Processing stays capped at 3 concurrent downloads.`,
+        );
+        return;
+      }
+
+      setYoutubeUrlsText(queueResult.failed.map((failure) => failure.url).join("\n"));
+      setCreateError(buildQueueFailureMessage(queueResult.failed));
+      if (queueResult.queued.length > 0) {
+        setCreateSummary(
+          `Queued ${queueResult.queued.length} ${pluralizeAudio(queueResult.queued.length)}. Left the ${queueResult.failed.length} failed ${pluralizeLine(queueResult.failed.length)} in the box so you can retry.`,
+        );
+      }
     } catch (failure) {
       setCreateError(
         failure instanceof Error
@@ -238,19 +263,24 @@ export function AudioDownloadView() {
           </div>
 
           <p className="panel-copy">
-            Queue the job once, get your input back immediately, and watch the
-            lifecycle progress below while the artifact moves into MinIO.
+            Paste one URL per line, queue the whole list in one shot, and watch the
+            lifecycle progress below while the artifacts move into MinIO. Runtime
+            processing is capped at 3 concurrent downloads.
           </p>
 
           <form className="auth-form" onSubmit={handleSubmit}>
             <label className="field">
-              <span>YouTube URL</span>
-              <input
+              <span>YouTube URLs</span>
+              <textarea
                 required
-                type="url"
-                placeholder="https://www.youtube.com/watch?v=..."
-                value={youtubeUrl}
-                onChange={(event) => setYoutubeUrl(event.target.value)}
+                rows={8}
+                placeholder={[
+                  "https://www.youtube.com/watch?v=...",
+                  "https://youtu.be/...",
+                  "https://www.youtube.com/watch?v=...",
+                ].join("\n")}
+                value={youtubeUrlsText}
+                onChange={(event) => setYoutubeUrlsText(event.target.value)}
               />
             </label>
 
@@ -271,24 +301,34 @@ export function AudioDownloadView() {
             </label>
 
             <p className="helper-copy">{selectedPreset.description}</p>
+            <p className="helper-copy">
+              Detected {requestedUrls.length} {pluralizeLine(requestedUrls.length)} to
+              queue.
+            </p>
 
             {createError !== null ? <p className="inline-error">{createError}</p> : null}
+            {createSummary !== null ? (
+              <p className="state-message">{createSummary}</p>
+            ) : null}
 
             <div className="toolbar-actions">
               <button
                 type="submit"
                 className="button primary"
-                disabled={createState !== "idle" || youtubeUrl.trim().length === 0}
+                disabled={createState !== "idle" || requestedUrls.length === 0}
               >
-                {createState === "queueing" ? "Queueing…" : "Queue audio"}
+                {createState === "queueing"
+                  ? "Queueing…"
+                  : `Queue ${requestedUrls.length || 0} ${pluralizeAudio(requestedUrls.length)}`}
               </button>
               <button
                 type="button"
                 className="button secondary"
-                disabled={createState !== "idle" || youtubeUrl.length === 0}
+                disabled={createState !== "idle" || youtubeUrlsText.length === 0}
                 onClick={() => {
-                  setYoutubeUrl("");
+                  setYoutubeUrlsText("");
                   setCreateError(null);
+                  setCreateSummary(null);
                 }}
               >
                 Clear
@@ -539,4 +579,93 @@ function isActiveAudioDownload(download: SavedAudioDownload): boolean {
     download.state === "downloading" ||
     download.state === "uploading"
   );
+}
+
+async function queueSavedAudioDownloads(
+  urls: string[],
+  preset: AudioDownloadPreset,
+): Promise<{
+  queued: SavedAudioDownload[];
+  failed: Array<{ url: string; message: string }>;
+}> {
+  const queued: SavedAudioDownload[] = [];
+  const failed: Array<{ url: string; message: string }> = [];
+
+  for (const batch of chunkArray(urls, 8)) {
+    const batchResults = await Promise.all(
+      batch.map(async (url) => {
+        try {
+          const savedDownload = await createSavedAudioDownload({
+            youtube_url: url,
+            preset,
+          });
+          return { ok: true as const, savedDownload };
+        } catch (failure) {
+          return {
+            ok: false as const,
+            message:
+              failure instanceof Error
+                ? failure.message
+                : "Could not queue this YouTube URL.",
+            url,
+          };
+        }
+      }),
+    );
+
+    for (const result of batchResults) {
+      if (result.ok) {
+        queued.push(result.savedDownload);
+        continue;
+      }
+
+      failed.push({
+        url: result.url,
+        message: result.message,
+      });
+    }
+  }
+
+  return { queued, failed };
+}
+
+function parseYouTubeUrls(input: string): string[] {
+  const matches = input.match(/https?:\/\/\S+/gi) ?? [];
+  const uniqueUrls = new Set<string>();
+
+  for (const match of matches) {
+    const normalized = match.replace(/[),.;]+$/u, "").trim();
+    if (normalized.length > 0) {
+      uniqueUrls.add(normalized);
+    }
+  }
+
+  return [...uniqueUrls];
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function buildQueueFailureMessage(
+  failures: Array<{ url: string; message: string }>,
+): string {
+  if (failures.length === 1) {
+    return `${failures[0]?.message ?? "Could not queue this YouTube URL."} The failed URL stayed in the textarea.`;
+  }
+
+  const firstFailure = failures[0]?.message ?? "Could not queue some YouTube URLs.";
+  return `${failures.length} URLs failed to queue. First error: ${firstFailure}`;
+}
+
+function pluralizeAudio(count: number): string {
+  return count === 1 ? "audio job" : "audio jobs";
+}
+
+function pluralizeLine(count: number): string {
+  return count === 1 ? "line" : "lines";
 }

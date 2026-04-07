@@ -1,5 +1,6 @@
 """Unit tests for the managed YouTube audio download state machine."""
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -55,6 +56,8 @@ def mock_factory():
 @pytest.fixture
 def service(mock_document_db, mock_factory, mock_settings):
     """Create the service under test."""
+    YouTubeAuthService._active_download_tasks = set()
+    YouTubeAuthService._download_semaphore = None
     return YouTubeAuthService(
         document_db=mock_document_db,
         factory=mock_factory,
@@ -190,3 +193,100 @@ class TestYouTubeAuthService:
 
         with pytest.raises(AudioDownloadStateConflictError):
             await service.delete_saved_audio_download(download_id="download-1")
+
+    @pytest.mark.asyncio
+    async def test_process_saved_audio_download_limits_concurrency_to_three(
+        self,
+        service,
+        mock_document_db,
+        mock_factory,
+    ):
+        """Never run more than three persisted audio jobs at the same time."""
+        queued_documents = {
+            f"download-{index}": SavedYouTubeAudioDownload(
+                id=f"download-{index}",
+                youtube_url=f"https://www.youtube.com/watch?v=dQw4w9WgXc{index}",
+                youtube_id=f"dQw4w9WgXc{index}",
+                title=None,
+                channel_name=None,
+                duration_seconds=None,
+                auth_mode=YouTubeAuthMode.MANAGED_COOKIE,
+                preset=AudioDownloadPreset.MP3_192,
+                audio_format="mp3",
+                audio_quality="192",
+                filename=None,
+                file_size_bytes=None,
+                bucket=None,
+                blob_path=None,
+                state=AudioDownloadState.QUEUED,
+                state_message="Queued for authenticated audio download.",
+            )
+            for index in range(4)
+        }
+
+        async def find_download(_collection: str, download_id: str):
+            return queued_documents[download_id].model_dump(mode="json")
+
+        mock_document_db.find_by_id.side_effect = find_download
+
+        concurrent_downloads = 0
+        peak_concurrency = 0
+        started_three = asyncio.Event()
+        release_downloads = asyncio.Event()
+        prepare_call_count = 0
+
+        with TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+
+            async def fake_prepare_audio_download(*, youtube_url: str, preset: str):
+                del preset
+                nonlocal concurrent_downloads, peak_concurrency, prepare_call_count
+                prepare_call_count += 1
+                concurrent_downloads += 1
+                peak_concurrency = max(peak_concurrency, concurrent_downloads)
+
+                if concurrent_downloads == 3:
+                    started_three.set()
+
+                cleanup_dir = base_dir / f"job-{prepare_call_count}"
+                cleanup_dir.mkdir(parents=True, exist_ok=True)
+                artifact_path = cleanup_dir / "track.mp3"
+                artifact_path.write_bytes(b"fake audio bytes")
+
+                await release_downloads.wait()
+                concurrent_downloads -= 1
+
+                return PreparedYouTubeAudioDownload(
+                    youtube_url=youtube_url,
+                    youtube_id=f"prepared-{prepare_call_count}",
+                    title=f"Track {prepare_call_count}",
+                    channel_name="Queue Tester",
+                    duration_seconds=120,
+                    auth_mode=YouTubeAuthMode.MANAGED_COOKIE,
+                    audio_format="mp3",
+                    audio_quality="192",
+                    file_path=artifact_path,
+                    cleanup_dir=cleanup_dir,
+                )
+
+            service.prepare_audio_download = AsyncMock(
+                side_effect=fake_prepare_audio_download
+            )
+
+            tasks = [
+                asyncio.create_task(
+                    service.process_saved_audio_download(download_id=download_id)
+                )
+                for download_id in queued_documents
+            ]
+
+            await asyncio.wait_for(started_three.wait(), timeout=1)
+            await asyncio.sleep(0.05)
+
+            assert concurrent_downloads == 3
+            assert peak_concurrency == 3
+
+            release_downloads.set()
+            await asyncio.gather(*tasks)
+
+        assert peak_concurrency == 3

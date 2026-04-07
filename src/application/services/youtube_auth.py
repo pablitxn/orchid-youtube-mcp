@@ -73,6 +73,7 @@ _AUDIO_DOWNLOAD_PRESETS: dict[AudioDownloadPreset, _AudioDownloadPresetSpec] = {
 }
 _AUDIO_DOWNLOAD_DOCUMENT_KIND = "saved_audio_download"
 _AUDIO_DOWNLOAD_PREFIX = "audio-downloads"
+_MAX_CONCURRENT_AUDIO_DOWNLOADS = 3
 _ACTIVE_AUDIO_DOWNLOAD_STATES = frozenset(
     {
         AudioDownloadState.QUEUED,
@@ -100,6 +101,7 @@ class YouTubeAuthService:
 
     _COOKIE_DOCUMENT_ID = "youtube_auth_cookie"
     _active_download_tasks: ClassVar[set[asyncio.Task[None]]] = set()
+    _download_semaphore: ClassVar[asyncio.Semaphore | None] = None
 
     def __init__(
         self,
@@ -338,138 +340,145 @@ class YouTubeAuthService:
             )
             return
 
-        prepared_download: PreparedYouTubeAudioDownload | None = None
-        blob_path: str | None = None
-        filename: str | None = None
-        file_size_bytes: int | None = None
-        blob_storage = self._factory.get_blob_storage()
+        async with self._get_download_semaphore():
+            prepared_download: PreparedYouTubeAudioDownload | None = None
+            blob_path: str | None = None
+            filename: str | None = None
+            file_size_bytes: int | None = None
+            blob_storage = self._factory.get_blob_storage()
 
-        try:
-            await self._set_saved_audio_download_state(
-                download_id=download_id,
-                state=AudioDownloadState.DOWNLOADING,
-                state_message="Fetching audio from YouTube with current credentials.",
-                error_code=None,
-                error_message=None,
-            )
-            prepared_download = await self.prepare_audio_download(
-                youtube_url=saved_download.youtube_url,
-                preset=saved_download.preset,
-            )
-            filename = _build_audio_download_filename(
-                prepared_download.title,
-                prepared_download.youtube_id,
-                prepared_download.audio_format,
-            )
-            blob_path = (
-                f"{_AUDIO_DOWNLOAD_PREFIX}/{prepared_download.youtube_id}/"
-                f"{download_id}/{filename}"
-            )
-            file_size_bytes = (
-                prepared_download.file_path.stat().st_size
-                if prepared_download.file_path.exists()
-                else 0
-            )
-
-            await self._set_saved_audio_download_state(
-                download_id=download_id,
-                state=AudioDownloadState.UPLOADING,
-                state_message="Uploading artifact to MinIO.",
-                youtube_id=prepared_download.youtube_id,
-                title=prepared_download.title,
-                channel_name=prepared_download.channel_name,
-                duration_seconds=prepared_download.duration_seconds,
-                auth_mode=prepared_download.auth_mode,
-                filename=filename,
-                file_size_bytes=file_size_bytes,
-                error_code=None,
-                error_message=None,
-            )
-
-            with prepared_download.file_path.open("rb") as audio_file:
-                await blob_storage.upload(
-                    self._downloads_bucket,
-                    blob_path,
-                    audio_file,
-                    content_type=_audio_media_type(prepared_download.audio_format),
-                    metadata={
-                        "youtube_id": prepared_download.youtube_id,
-                        "preset": saved_download.preset.value,
-                    },
+            try:
+                await self._set_saved_audio_download_state(
+                    download_id=download_id,
+                    state=AudioDownloadState.DOWNLOADING,
+                    state_message=(
+                        "Fetching audio from YouTube with current credentials."
+                    ),
+                    error_code=None,
+                    error_message=None,
+                )
+                prepared_download = await self.prepare_audio_download(
+                    youtube_url=saved_download.youtube_url,
+                    preset=saved_download.preset,
+                )
+                filename = _build_audio_download_filename(
+                    prepared_download.title,
+                    prepared_download.youtube_id,
+                    prepared_download.audio_format,
+                )
+                blob_path = (
+                    f"{_AUDIO_DOWNLOAD_PREFIX}/{prepared_download.youtube_id}/"
+                    f"{download_id}/{filename}"
+                )
+                file_size_bytes = (
+                    prepared_download.file_path.stat().st_size
+                    if prepared_download.file_path.exists()
+                    else 0
                 )
 
-            await self._set_saved_audio_download_state(
-                download_id=download_id,
-                state=AudioDownloadState.COMPLETED,
-                state_message="Saved to object storage and ready to download.",
-                youtube_id=prepared_download.youtube_id,
-                title=prepared_download.title,
-                channel_name=prepared_download.channel_name,
-                duration_seconds=prepared_download.duration_seconds,
-                auth_mode=prepared_download.auth_mode,
-                filename=filename,
-                file_size_bytes=file_size_bytes,
-                bucket=self._downloads_bucket,
-                blob_path=blob_path,
-                error_code=None,
-                error_message=None,
-            )
-        except Exception as exc:
-            if blob_path is not None and await blob_storage.exists(
-                self._downloads_bucket, blob_path
-            ):
-                await blob_storage.delete(self._downloads_bucket, blob_path)
+                await self._set_saved_audio_download_state(
+                    download_id=download_id,
+                    state=AudioDownloadState.UPLOADING,
+                    state_message="Uploading artifact to MinIO.",
+                    youtube_id=prepared_download.youtube_id,
+                    title=prepared_download.title,
+                    channel_name=prepared_download.channel_name,
+                    duration_seconds=prepared_download.duration_seconds,
+                    auth_mode=prepared_download.auth_mode,
+                    filename=filename,
+                    file_size_bytes=file_size_bytes,
+                    error_code=None,
+                    error_message=None,
+                )
 
-            error_code, error_message = _audio_download_failure_details(exc)
-            await self._set_saved_audio_download_state(
-                download_id=download_id,
-                state=AudioDownloadState.FAILED,
-                state_message="Audio download failed.",
-                youtube_id=(
-                    prepared_download.youtube_id
-                    if prepared_download is not None
-                    else None
-                ),
-                title=(
-                    prepared_download.title if prepared_download is not None else None
-                ),
-                channel_name=(
-                    prepared_download.channel_name
-                    if prepared_download is not None
-                    else None
-                ),
-                duration_seconds=(
-                    prepared_download.duration_seconds
-                    if prepared_download is not None
-                    else None
-                ),
-                auth_mode=(
-                    prepared_download.auth_mode
-                    if prepared_download is not None
-                    else None
-                ),
-                filename=filename,
-                file_size_bytes=file_size_bytes,
-                error_code=error_code,
-                error_message=error_message,
-            )
-            self._logger.warning(
-                "Saved audio download failed",
-                extra={
-                    "download_id": download_id,
-                    "youtube_url": saved_download.youtube_url,
-                    "youtube_id": saved_download.youtube_id,
-                    "preset": saved_download.preset.value,
-                    "error_code": error_code,
-                },
-                exc_info=not isinstance(
-                    exc,
-                    (DownloadError, VideoNotFoundError, ValueError),
-                ),
-            )
-        finally:
-            if prepared_download is not None:
-                shutil.rmtree(prepared_download.cleanup_dir, ignore_errors=True)
+                with prepared_download.file_path.open("rb") as audio_file:
+                    await blob_storage.upload(
+                        self._downloads_bucket,
+                        blob_path,
+                        audio_file,
+                        content_type=_audio_media_type(
+                            prepared_download.audio_format
+                        ),
+                        metadata={
+                            "youtube_id": prepared_download.youtube_id,
+                            "preset": saved_download.preset.value,
+                        },
+                    )
+
+                await self._set_saved_audio_download_state(
+                    download_id=download_id,
+                    state=AudioDownloadState.COMPLETED,
+                    state_message="Saved to object storage and ready to download.",
+                    youtube_id=prepared_download.youtube_id,
+                    title=prepared_download.title,
+                    channel_name=prepared_download.channel_name,
+                    duration_seconds=prepared_download.duration_seconds,
+                    auth_mode=prepared_download.auth_mode,
+                    filename=filename,
+                    file_size_bytes=file_size_bytes,
+                    bucket=self._downloads_bucket,
+                    blob_path=blob_path,
+                    error_code=None,
+                    error_message=None,
+                )
+            except Exception as exc:
+                if blob_path is not None and await blob_storage.exists(
+                    self._downloads_bucket, blob_path
+                ):
+                    await blob_storage.delete(self._downloads_bucket, blob_path)
+
+                error_code, error_message = _audio_download_failure_details(exc)
+                await self._set_saved_audio_download_state(
+                    download_id=download_id,
+                    state=AudioDownloadState.FAILED,
+                    state_message="Audio download failed.",
+                    youtube_id=(
+                        prepared_download.youtube_id
+                        if prepared_download is not None
+                        else None
+                    ),
+                    title=(
+                        prepared_download.title
+                        if prepared_download is not None
+                        else None
+                    ),
+                    channel_name=(
+                        prepared_download.channel_name
+                        if prepared_download is not None
+                        else None
+                    ),
+                    duration_seconds=(
+                        prepared_download.duration_seconds
+                        if prepared_download is not None
+                        else None
+                    ),
+                    auth_mode=(
+                        prepared_download.auth_mode
+                        if prepared_download is not None
+                        else None
+                    ),
+                    filename=filename,
+                    file_size_bytes=file_size_bytes,
+                    error_code=error_code,
+                    error_message=error_message,
+                )
+                self._logger.warning(
+                    "Saved audio download failed",
+                    extra={
+                        "download_id": download_id,
+                        "youtube_url": saved_download.youtube_url,
+                        "youtube_id": saved_download.youtube_id,
+                        "preset": saved_download.preset.value,
+                        "error_code": error_code,
+                    },
+                    exc_info=not isinstance(
+                        exc,
+                        (DownloadError, VideoNotFoundError, ValueError),
+                    ),
+                )
+            finally:
+                if prepared_download is not None:
+                    shutil.rmtree(prepared_download.cleanup_dir, ignore_errors=True)
 
     async def list_saved_audio_downloads(
         self,
@@ -713,6 +722,15 @@ class YouTubeAuthService:
     def _forget_active_download_task(cls, task: asyncio.Task[None]) -> None:
         """Drop completed background tasks from the in-memory registry."""
         cls._active_download_tasks.discard(task)
+
+    @classmethod
+    def _get_download_semaphore(cls) -> asyncio.Semaphore:
+        """Create the shared download limiter lazily for the process."""
+        if cls._download_semaphore is None:
+            cls._download_semaphore = asyncio.Semaphore(
+                _MAX_CONCURRENT_AUDIO_DOWNLOADS
+            )
+        return cls._download_semaphore
 
     def _disable_auth(self) -> None:
         downloader = self._factory.get_youtube_downloader()
