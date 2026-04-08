@@ -28,7 +28,7 @@ dependencies = [
     "tenacity>=9.0.0",  # retry logic
     # MCP Server
     "mcp[ws]>=1.24.0,<2",
-    "agent-framework-core==1.0.0rc3",
+    "agent-framework-core==1.0.0",
     # Observability
     "langfuse>=2.0.0",
     "orchid-mcp-commons[blob,db,observability]",
