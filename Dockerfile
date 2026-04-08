@@ -22,7 +22,7 @@ RUN uv sync --frozen --no-dev --no-editable
 # =============================================================================
 # Stage 2: Frontend builder - Build the React admin UI
 # =============================================================================
-FROM node:24-bookworm-slim AS frontend-builder
+FROM node:25-bookworm-slim AS frontend-builder
 
 WORKDIR /frontend
 
