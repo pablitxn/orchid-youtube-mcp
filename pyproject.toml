@@ -19,7 +19,7 @@ dependencies = [
     "openai>=1.55.0",
     "anthropic>=0.40.0",
     "httpx>=0.28.0",
-    "cryptography>=45.0.0",
+    "cryptography>=46.0.7",
     # Infrastructure - Video Processing
     "ffmpeg-python>=0.2.0",
     "pillow>=11.0.0",
