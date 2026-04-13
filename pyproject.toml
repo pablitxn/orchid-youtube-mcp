@@ -22,7 +22,7 @@ dependencies = [
     "cryptography>=45.0.0",
     # Infrastructure - Video Processing
     "ffmpeg-python>=0.2.0",
-    "pillow>=11.0.0",
+    "pillow>=12.2.0",
     # Utilities
     "aiofiles>=24.1.0",
     "tenacity>=9.0.0",  # retry logic
