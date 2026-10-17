@@ -224,3 +224,6 @@ Ensure your API key is valid and has access to:
 - `whisper-1` model (transcription)
 - `text-embedding-3-small` model (embeddings)
 - `gpt-4o` model (LLM queries)
+
+
+Local service credentials must be supplied privately in .env. Set MONGO_URI to the complete authenticated MongoDB URI, percent-encoding credentials when necessary. Start Python commands with uv run --env-file .env so both application settings and shared resources receive the same environment. Existing database volumes require their current credentials; editing configuration does not rotate stored accounts.

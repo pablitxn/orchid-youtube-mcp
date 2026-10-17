@@ -39,9 +39,7 @@ class MinioConfig:
     endpoint: str = field(
         default_factory=lambda: os.getenv("MINIO_ENDPOINT", "localhost:9000")
     )
-    access_key: str = field(
-        default_factory=lambda: os.getenv("MINIO_ROOT_USER", "")
-    )
+    access_key: str = field(default_factory=lambda: os.getenv("MINIO_ROOT_USER", ""))
     secret_key: str = field(
         default_factory=lambda: os.getenv("MINIO_ROOT_PASSWORD", "")
     )
@@ -73,9 +71,7 @@ class MongoDBConfig:
     host: str = field(default_factory=lambda: os.getenv("MONGO_HOST", "localhost"))
     port: int = field(default_factory=lambda: int(os.getenv("MONGO_PORT", "27017")))
     username: str = field(default_factory=lambda: os.getenv("MONGO_USERNAME", ""))
-    password: str = field(
-        default_factory=lambda: os.getenv("MONGO_PASSWORD", "")
-    )
+    password: str = field(default_factory=lambda: os.getenv("MONGO_PASSWORD", ""))
     database: str = "youtube_rag"
     collections: list[str] = field(
         default_factory=lambda: [
@@ -96,6 +92,11 @@ MONGODB_CONFIG = MongoDBConfig()
 
 def clean_minio(dry_run: bool = False) -> None:
     """Clean all objects from MinIO buckets."""
+    if not MINIO_CONFIG.access_key.strip() or not MINIO_CONFIG.secret_key.strip():
+        raise ValueError(
+            "Set MINIO_ROOT_USER and MINIO_ROOT_PASSWORD privately before cleanup."
+        )
+
     from minio import Minio
     from minio.error import S3Error
 
@@ -182,6 +183,11 @@ def _clean_qdrant_collection(
 
 async def clean_mongodb_async(dry_run: bool = False) -> None:
     """Clean all documents from MongoDB collections."""
+    if not MONGODB_CONFIG.username.strip() or not MONGODB_CONFIG.password.strip():
+        raise ValueError(
+            "Set MONGO_USERNAME and MONGO_PASSWORD privately before cleanup."
+        )
+
     from motor.motor_asyncio import AsyncIOMotorClient
 
     print("\n=== Cleaning MongoDB ===")

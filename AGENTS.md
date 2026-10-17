@@ -12,7 +12,7 @@ Tests are organized in `tests/unit/`, `tests/integration/`, and `tests/e2e/`. Ru
 ## Build, Test, and Development Commands
 - `uv sync --dev`: install dependencies for local development.
 - `docker-compose up -d`: start MongoDB, Qdrant, and MinIO locally.
-- `uv run uvicorn src.adapters.main:app --reload --host 0.0.0.0 --port 8000`: run the API server.
+- `uv run --env-file .env uvicorn src.adapters.main:app --reload --host 0.0.0.0 --port 8000`: run the API server with private local configuration.
 - `uv run ruff check src tests`: lint and import/order checks.
 - `uv run ruff format src tests`: apply formatting.
 - `uv run mypy src`: strict type-checking for source code.

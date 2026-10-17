@@ -16,7 +16,6 @@ from src.infrastructure.factory import (
     reset_factory,
 )
 
-
 TEST_MINIO_ACCESS_KEY = secrets.token_urlsafe(18)
 TEST_MINIO_SECRET_KEY = secrets.token_urlsafe(30)
 
