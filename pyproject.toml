@@ -27,7 +27,7 @@ dependencies = [
     "aiofiles>=24.1.0",
     "tenacity>=9.0.0",  # retry logic
     # MCP Server
-    "mcp[ws]>=1.24.0,<2",
+    "mcp[ws]>=1.24.0,<3",
     "agent-framework-core==1.0.0rc3",
     # Observability
     "langfuse>=2.0.0",
