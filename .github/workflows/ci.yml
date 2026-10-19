@@ -18,10 +18,10 @@ jobs:
     name: Lint & Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7.4.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "latest"
 
@@ -41,10 +41,10 @@ jobs:
     name: Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7.4.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "latest"
 
@@ -61,10 +61,10 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7.4.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "latest"
 
@@ -78,7 +78,7 @@ jobs:
         run: uv run pytest -m "not integration and not e2e" --cov-fail-under=0
 
       - name: Upload coverage reports
-        uses: codecov/codecov-action@v5.5.2
+        uses: codecov/codecov-action@v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
@@ -96,10 +96,10 @@ jobs:
           - 6333:6333
 
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7.4.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "latest"
 
