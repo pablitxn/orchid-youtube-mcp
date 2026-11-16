@@ -3,7 +3,7 @@
 # =============================================================================
 # Stage 1: Builder - Install dependencies
 # =============================================================================
-FROM python:3.14-slim AS builder
+FROM python:3.15-slim AS builder
 
 # Install git (required for git dependencies)
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
@@ -35,7 +35,7 @@ RUN npm run build
 # =============================================================================
 # Stage 3: Runtime - Final image
 # =============================================================================
-FROM python:3.14-slim AS runtime
+FROM python:3.15-slim AS runtime
 
 # Install runtime system dependencies
 # nodejs is required by yt-dlp for YouTube JS challenge resolution
